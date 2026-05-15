@@ -1,0 +1,224 @@
+import React, { useState } from "react";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { motion } from "framer-motion";
+import { Download, Printer, Share2, AlertTriangle, CheckCircle2, Clock } from "lucide-react";
+
+interface ExecutiveReportViewerProps {
+  apkName: string;
+  riskScore: number;
+  timestamp: Date;
+  summary: string;
+  findings: string[];
+  recommendations: string[];
+  timeline: Array<{ time: string; event: string }>;
+}
+
+export function ExecutiveReportViewer({
+  apkName,
+  riskScore,
+  timestamp,
+  summary,
+  findings,
+  recommendations,
+  timeline,
+}: ExecutiveReportViewerProps) {
+  const [activeTab, setActiveTab] = useState<"summary" | "findings" | "recommendations" | "timeline">("summary");
+
+  const getRiskLevel = (score: number) => {
+    if (score >= 80) return { label: "CRITICAL", color: "text-red-400", bg: "bg-red-500/10" };
+    if (score >= 60) return { label: "HIGH", color: "text-orange-400", bg: "bg-orange-500/10" };
+    if (score >= 40) return { label: "MEDIUM", color: "text-yellow-400", bg: "bg-yellow-500/10" };
+    return { label: "LOW", color: "text-green-400", bg: "bg-green-500/10" };
+  };
+
+  const riskLevel = getRiskLevel(riskScore);
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="space-y-4"
+      >
+        <Card className="bg-gradient-to-r from-blue-500/10 via-cyan-500/10 to-blue-500/10 border-blue-500/20 p-6">
+          <div className="space-y-4">
+            {/* Title */}
+            <div>
+              <h1 className="text-2xl font-bold text-foreground mb-1">
+                Android Malware Investigation Report
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                Enterprise-Grade Security Analysis
+              </p>
+            </div>
+
+            {/* APK Info */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">APK Name</p>
+                <p className="font-mono text-sm text-foreground break-all">{apkName}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Analysis Date</p>
+                <p className="text-sm text-foreground">
+                  {timestamp.toLocaleString()}
+                </p>
+              </div>
+            </div>
+
+            {/* Risk Score */}
+            <motion.div
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              className={`${riskLevel.bg} border border-current/20 rounded-lg p-4`}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">Risk Assessment</p>
+                  <p className={`text-3xl font-bold ${riskLevel.color}`}>
+                    {riskScore}
+                    <span className="text-lg text-muted-foreground">/100</span>
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className={`text-lg font-bold ${riskLevel.color}`}>
+                    {riskLevel.label}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Severity Level</p>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        </Card>
+      </motion.div>
+
+      {/* Tabs */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.1 }}
+        className="flex gap-2 border-b border-white/10"
+      >
+        {(["summary", "findings", "recommendations", "timeline"] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
+              activeTab === tab
+                ? "text-cyan-300 border-cyan-500"
+                : "text-muted-foreground border-transparent hover:text-foreground"
+            }`}
+          >
+            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+          </button>
+        ))}
+      </motion.div>
+
+      {/* Content */}
+      <motion.div
+        key={activeTab}
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
+        {activeTab === "summary" && (
+          <Card className="bg-white/5 border-white/10 p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-foreground">Executive Summary</h2>
+            <p className="text-sm text-muted-foreground leading-relaxed">{summary}</p>
+          </Card>
+        )}
+
+        {activeTab === "findings" && (
+          <Card className="bg-white/5 border-white/10 p-6 space-y-3">
+            <h2 className="text-lg font-semibold text-foreground mb-4">Key Findings</h2>
+            <div className="space-y-2">
+              {findings.map((finding, index) => (
+                <motion.div
+                  key={index}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                  className="flex gap-3 text-sm"
+                >
+                  <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-muted-foreground">{finding}</p>
+                </motion.div>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {activeTab === "recommendations" && (
+          <Card className="bg-white/5 border-white/10 p-6 space-y-3">
+            <h2 className="text-lg font-semibold text-foreground mb-4">Recommendations</h2>
+            <div className="space-y-2">
+              {recommendations.map((rec, index) => (
+                <motion.div
+                  key={index}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                  className="flex gap-3 text-sm"
+                >
+                  <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-muted-foreground">{rec}</p>
+                </motion.div>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {activeTab === "timeline" && (
+          <Card className="bg-white/5 border-white/10 p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-foreground mb-4">Investigation Timeline</h2>
+            <div className="space-y-3">
+              {timeline.map((entry, index) => (
+                <motion.div
+                  key={index}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                  className="flex gap-4"
+                >
+                  <div className="flex flex-col items-center">
+                    <Clock className="w-4 h-4 text-cyan-400" />
+                    {index < timeline.length - 1 && (
+                      <div className="w-0.5 h-8 bg-cyan-400/20 mt-1" />
+                    )}
+                  </div>
+                  <div className="pb-4">
+                    <p className="text-xs font-mono text-cyan-300">{entry.time}</p>
+                    <p className="text-sm text-muted-foreground">{entry.event}</p>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </Card>
+        )}
+      </motion.div>
+
+      {/* Actions */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+        className="flex gap-2"
+      >
+        <Button className="flex-1 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/30">
+          <Download className="w-4 h-4 mr-2" />
+          Download PDF
+        </Button>
+        <Button variant="outline" className="border-white/20">
+          <Printer className="w-4 h-4 mr-2" />
+          Print
+        </Button>
+        <Button variant="outline" className="border-white/20">
+          <Share2 className="w-4 h-4 mr-2" />
+          Share
+        </Button>
+      </motion.div>
+    </div>
+  );
+}

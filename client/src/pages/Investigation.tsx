@@ -1,310 +1,351 @@
-import { useState, useEffect } from "react";
-import { Card } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Brain,
-  CheckCircle,
-  Clock,
-  AlertTriangle,
-  Zap,
-  Shield,
-  Network,
-} from "lucide-react";
+import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PremiumAgentCard } from "@/components/PremiumAgentCard";
+import { LiveInvestigationLog, type LogEntry } from "@/components/LiveInvestigationLog";
+import { ThreatIntelligencePanel, type IOC } from "@/components/ThreatIntelligencePanel";
+import { AIReasoningPanel } from "@/components/AIReasoningPanel";
+import { RiskScoreVisualization } from "@/components/RiskScoreVisualization";
+import { PremiumSOCCopilot } from "@/components/PremiumSOCCopilot";
+import { PremiumThreatVisualization } from "@/components/PremiumThreatVisualization";
+import { ExecutiveReportViewer } from "@/components/ExecutiveReportViewer";
+import { CriticalAlertModal } from "@/components/CriticalAlertModal";
+import { AlertTriangle, Brain, Shield, Zap, Network } from "lucide-react";
 
-interface Agent {
-  id: string;
+interface AgentState {
   name: string;
-  icon: React.ReactNode;
   status: "pending" | "running" | "completed" | "error";
-  progress: number;
-  findings?: string;
+  confidence?: number;
+  reasoning?: string;
+  progress?: number;
+  icon?: React.ReactNode;
 }
 
+const AGENT_CONFIGS: AgentState[] = [
+  {
+    name: "Reverse Engineering",
+    status: "pending",
+    icon: <Zap className="w-5 h-5" />,
+  },
+  {
+    name: "Static Analysis",
+    status: "pending",
+    icon: <Shield className="w-5 h-5" />,
+  },
+  {
+    name: "Dynamic Threat",
+    status: "pending",
+    icon: <Network className="w-5 h-5" />,
+  },
+  {
+    name: "Threat Intelligence",
+    status: "pending",
+    icon: <Brain className="w-5 h-5" />,
+  },
+  {
+    name: "AI Reasoning",
+    status: "pending",
+    icon: <Brain className="w-5 h-5" />,
+  },
+  {
+    name: "Risk Scoring",
+    status: "pending",
+    icon: <AlertTriangle className="w-5 h-5" />,
+  },
+  {
+    name: "Executive Report",
+    status: "pending",
+    icon: <Shield className="w-5 h-5" />,
+  },
+];
+
+const INVESTIGATION_LOGS = [
+  "Initializing secure malware sandbox",
+  "Reverse engineering APK structure",
+  "Extracting AndroidManifest.xml",
+  "Scanning dangerous permissions",
+  "Investigating accessibility abuse",
+  "Detecting SMS interception behavior",
+  "Monitoring encrypted payload execution",
+  "Correlating threat intelligence",
+  "Running AI malware reasoning",
+  "Generating executive threat report",
+];
+
 export default function Investigation() {
-  const [agents, setAgents] = useState<Agent[]>([
-    {
-      id: "1",
-      name: "APK Reverse Engineering",
-      icon: <Zap className="w-5 h-5" />,
-      status: "running",
-      progress: 45,
-    },
-    {
-      id: "2",
-      name: "Static Malware Analysis",
-      icon: <Shield className="w-5 h-5" />,
-      status: "pending",
-      progress: 0,
-    },
-    {
-      id: "3",
-      name: "Dynamic Threat Investigation",
-      icon: <Network className="w-5 h-5" />,
-      status: "pending",
-      progress: 0,
-    },
-    {
-      id: "4",
-      name: "Threat Intelligence Correlation",
-      icon: <Brain className="w-5 h-5" />,
-      status: "pending",
-      progress: 0,
-    },
-    {
-      id: "5",
-      name: "AI Malware Reasoning",
-      icon: <Brain className="w-5 h-5" />,
-      status: "pending",
-      progress: 0,
-    },
-    {
-      id: "6",
-      name: "Risk Scoring",
-      icon: <AlertTriangle className="w-5 h-5" />,
-      status: "pending",
-      progress: 0,
-    },
-    {
-      id: "7",
-      name: "Executive Report Generation",
-      icon: <Shield className="w-5 h-5" />,
-      status: "pending",
-      progress: 0,
-    },
-  ]);
+  const [agents, setAgents] = useState<AgentState[]>(AGENT_CONFIGS);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(true);
+  const [riskScore, setRiskScore] = useState(0);
+  const [showCriticalAlert, setShowCriticalAlert] = useState(false);
+  const [activeTab, setActiveTab] = useState("live");
 
-  const [logs, setLogs] = useState<string[]>([
-    "[✓] APK uploaded successfully",
-    "[✓] File validation passed",
-    "[→] Starting reverse engineering analysis...",
-  ]);
-
-  // Simulate agent progress
+  // Simulate investigation progress
   useEffect(() => {
+    if (!isAnalyzing) return;
+
     const interval = setInterval(() => {
+      setLogs((prev) => {
+        if (prev.length < INVESTIGATION_LOGS.length) {
+          const newLog: LogEntry = {
+            id: `log-${Date.now()}`,
+            agent: INVESTIGATION_LOGS[prev.length],
+            message: INVESTIGATION_LOGS[prev.length],
+            status: "running",
+            timestamp: new Date().toISOString(),
+            progress: Math.random() * 100,
+          };
+          return [...prev, newLog];
+        }
+        return prev;
+      });
+
       setAgents((prev) => {
         const updated = [...prev];
-        const runningAgent = updated.find((a) => a.status === "running");
+        const currentIndex = logs.length;
 
-        if (runningAgent) {
-          if (runningAgent.progress < 100) {
-            runningAgent.progress += Math.random() * 15;
-            if (runningAgent.progress > 100) {
-              runningAgent.progress = 100;
-              runningAgent.status = "completed";
+        if (currentIndex < updated.length) {
+          // Mark current agent as running
+          if (currentIndex > 0) {
+            updated[currentIndex - 1].status = "completed";
+            updated[currentIndex - 1].confidence = 85 + Math.random() * 15;
+          }
 
-              // Move to next agent
-              const nextIndex =
-                updated.findIndex((a) => a.id === runningAgent.id) + 1;
-              if (nextIndex < updated.length) {
-                updated[nextIndex].status = "running";
-              }
-            }
+          updated[currentIndex].status = "running";
+          updated[currentIndex].progress = Math.random() * 100;
+          updated[currentIndex].reasoning =
+            "Analyzing APK structure and permissions...";
+
+          // Update risk score
+          setRiskScore(Math.min(100, (currentIndex + 1) * 12 + Math.random() * 8));
+        } else {
+          // All agents completed
+          updated[updated.length - 1].status = "completed";
+          updated[updated.length - 1].confidence = 92;
+          setIsAnalyzing(false);
+
+          // Show critical alert if risk score is high
+          if (riskScore > 80) {
+            setTimeout(() => setShowCriticalAlert(true), 1000);
           }
         }
 
         return updated;
       });
-    }, 1000);
+    }, 1500);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [logs.length, isAnalyzing, riskScore]);
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "completed":
-        return <CheckCircle className="w-5 h-5 text-green-400" />;
-      case "running":
-        return <Clock className="w-5 h-5 text-cyan-400 animate-spin" />;
-      case "error":
-        return <AlertTriangle className="w-5 h-5 text-red-400" />;
-      default:
-        return <Clock className="w-5 h-5 text-muted-foreground" />;
-    }
-  };
-
-  const overallProgress = Math.round(
-    agents.reduce((sum, a) => sum + a.progress, 0) / agents.length
-  );
+  // Mark completed logs
+  useEffect(() => {
+    setLogs((prev) =>
+      prev.map((log, index) => ({
+        ...log,
+        status:
+          index < logs.length - 1 ? "completed" : isAnalyzing ? "running" : "completed",
+      }))
+    );
+  }, [isAnalyzing, logs.length]);
 
   return (
-    <div className="min-h-screen bg-background text-foreground pt-20">
+    <div className="space-y-6 pb-8">
+      {/* Critical Alert Modal */}
+      <CriticalAlertModal
+        isOpen={showCriticalAlert}
+        riskScore={Math.round(riskScore)}
+        apkName="com.malicious.trojan.banking"
+        topThreats={[
+          "Banking Trojan Behavior",
+          "SMS Interception",
+          "Credential Harvesting",
+        ]}
+        onClose={() => setShowCriticalAlert(false)}
+        onViewDetails={() => setActiveTab("report")}
+      />
+
       {/* Header */}
-      <div className="border-b border-white/10 py-8 px-4">
-        <div className="container">
-          <h1 className="text-4xl font-bold mb-2">Live Investigation</h1>
-          <p className="text-muted-foreground">
-            Real-time malware analysis in progress
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="space-y-2"
+      >
+        <h1 className="text-3xl font-bold text-foreground">Live Investigation</h1>
+        <p className="text-muted-foreground">
+          Real-time APK analysis with 7 autonomous AI agents
+        </p>
+      </motion.div>
+
+      {/* Risk Score Header */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="grid grid-cols-3 gap-4"
+      >
+        <div className="bg-white/5 border border-white/10 rounded-lg p-4">
+          <p className="text-xs text-muted-foreground mb-2">Current Risk Score</p>
+          <motion.p
+            className="text-3xl font-bold text-cyan-300"
+            animate={{ scale: [1, 1.05, 1] }}
+            transition={{ duration: 0.5, delay: 0.2 }}
+          >
+            {Math.round(riskScore)}
+            <span className="text-lg text-muted-foreground">/100</span>
+          </motion.p>
+        </div>
+
+        <div className="bg-white/5 border border-white/10 rounded-lg p-4">
+          <p className="text-xs text-muted-foreground mb-2">Agents Active</p>
+          <p className="text-3xl font-bold text-cyan-300">
+            {agents.filter((a) => a.status !== "pending").length}
+            <span className="text-lg text-muted-foreground">/7</span>
           </p>
         </div>
-      </div>
 
-      {/* Main Content */}
-      <div className="container py-12 px-4">
-        <div className="grid lg:grid-cols-3 gap-8">
-          {/* Main Investigation Area */}
-          <div className="lg:col-span-2 space-y-8">
-            {/* Overall Progress */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6 }}
-            >
-              <Card className="card-premium">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-semibold">Analysis Progress</h2>
-                  <span className="text-2xl font-bold text-cyan-400">
-                    {overallProgress}%
-                  </span>
-                </div>
-                <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden">
-                  <motion.div
-                    className="h-full bg-gradient-to-r from-cyan-400 to-blue-400 rounded-full"
-                    initial={{ width: 0 }}
-                    animate={{ width: `${overallProgress}%` }}
-                    transition={{ duration: 0.5 }}
-                  />
-                </div>
-              </Card>
-            </motion.div>
-
-            {/* Agent Cards */}
-            <div className="space-y-4">
-              <h2 className="text-xl font-semibold mb-4">AI Agents</h2>
-              {agents.map((agent, idx) => (
-                <motion.div
-                  key={agent.id}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.4, delay: idx * 0.05 }}
-                >
-                  <Card
-                    className={`card-premium transition-all ${
-                      agent.status === "running"
-                        ? "border-cyan-500/50 bg-cyan-500/5"
-                        : ""
-                    }`}
-                  >
-                    <div className="flex items-start gap-4">
-                      <div className="text-cyan-400 mt-1">{agent.icon}</div>
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between mb-2">
-                          <h3 className="font-semibold">{agent.name}</h3>
-                          {getStatusIcon(agent.status)}
-                        </div>
-
-                        {agent.status !== "pending" && (
-                          <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
-                            <motion.div
-                              className="h-full bg-gradient-to-r from-cyan-400 to-blue-400"
-                              initial={{ width: 0 }}
-                              animate={{ width: `${agent.progress}%` }}
-                              transition={{ duration: 0.3 }}
-                            />
-                          </div>
-                        )}
-
-                        {agent.status === "running" && (
-                          <p className="text-xs text-muted-foreground mt-2">
-                            Processing...
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </Card>
-                </motion.div>
-              ))}
-            </div>
-
-            {/* Activity Log */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.2 }}
-            >
-              <Card className="card-premium">
-                <h2 className="text-xl font-semibold mb-4">Activity Log</h2>
-                <div className="space-y-2 max-h-64 overflow-y-auto font-mono text-sm">
-                  {logs.map((log, idx) => (
-                    <motion.div
-                      key={idx}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ duration: 0.3 }}
-                      className="text-muted-foreground"
-                    >
-                      <span className="text-cyan-400">{log}</span>
-                    </motion.div>
-                  ))}
-                </div>
-              </Card>
-            </motion.div>
-          </div>
-
-          {/* Sidebar */}
-          <div className="lg:col-span-1">
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.6 }}
-              className="space-y-6"
-            >
-              {/* Analysis Info */}
-              <Card className="card-premium">
-                <h3 className="font-semibold mb-4">Analysis Info</h3>
-                <div className="space-y-3 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">File Name</p>
-                    <p className="font-semibold">sample.apk</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">File Size</p>
-                    <p className="font-semibold">45.2 MB</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Started</p>
-                    <p className="font-semibold">Just now</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Status</p>
-                    <p className="font-semibold text-cyan-400">In Progress</p>
-                  </div>
-                </div>
-              </Card>
-
-              {/* Preliminary Findings */}
-              <Card className="card-premium">
-                <h3 className="font-semibold mb-4">Preliminary Findings</h3>
-                <div className="space-y-2 text-sm">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-yellow-400" />
-                    <span>Dangerous permissions detected</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-yellow-400" />
-                    <span>Obfuscated code found</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-yellow-400" />
-                    <span>Suspicious API calls</span>
-                  </div>
-                </div>
-              </Card>
-
-              {/* Estimated Time */}
-              <Card className="card-premium border-cyan-500/30 bg-cyan-500/5">
-                <h3 className="font-semibold mb-2 text-cyan-300">
-                  Estimated Time
-                </h3>
-                <p className="text-sm text-muted-foreground">
-                  Analysis will complete in approximately 2-3 minutes.
-                </p>
-              </Card>
-            </motion.div>
-          </div>
+        <div className="bg-white/5 border border-white/10 rounded-lg p-4">
+          <p className="text-xs text-muted-foreground mb-2">Status</p>
+          <p className={`text-lg font-bold ${isAnalyzing ? "text-cyan-300" : "text-green-300"}`}>
+            {isAnalyzing ? "Analyzing..." : "Complete"}
+          </p>
         </div>
-      </div>
+      </motion.div>
+
+      {/* Main Content Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <TabsList className="grid w-full grid-cols-5 bg-white/5 border border-white/10">
+          <TabsTrigger value="live">Live Stream</TabsTrigger>
+          <TabsTrigger value="agents">Agents</TabsTrigger>
+          <TabsTrigger value="threats">Threats</TabsTrigger>
+          <TabsTrigger value="reasoning">Reasoning</TabsTrigger>
+          <TabsTrigger value="report">Report</TabsTrigger>
+        </TabsList>
+
+        {/* Live Stream Tab */}
+        <TabsContent value="live" className="space-y-4">
+          <div className="grid grid-cols-3 gap-4">
+            <div className="col-span-2">
+              <LiveInvestigationLog
+                logs={logs}
+                isActive={isAnalyzing}
+                onComplete={() => setIsAnalyzing(false)}
+              />
+            </div>
+            <div>
+              <RiskScoreVisualization
+              overallScore={Math.round(riskScore)}
+              breakdown={{
+                dataExfiltration: 85,
+                credentialHarvesting: 92,
+                c2Communication: 78,
+                bankingTrojan: 88,
+              }}
+            />
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* Agents Tab */}
+        <TabsContent value="agents" className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            {agents.map((agent, index) => (
+              <PremiumAgentCard key={agent.name} agent={agent} index={index} />
+            ))}
+          </div>
+        </TabsContent>
+
+        {/* Threats Tab */}
+        <TabsContent value="threats" className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <ThreatIntelligencePanel
+                iocs={[
+                  {
+                    type: "permission",
+                    value: "READ_SMS",
+                    severity: "critical",
+                    description: "Allows reading SMS messages",
+                  },
+                  {
+                    type: "network_endpoint",
+                    value: "192.168.1.100:8080",
+                    severity: "high",
+                    description: "Command and control server",
+                  },
+                ]}
+              />
+            </div>
+            <div>
+              <PremiumThreatVisualization
+                threats={[
+                  {
+                    id: "perm-1",
+                    label: "READ_SMS",
+                    severity: 95,
+                    type: "permission",
+                  },
+                  {
+                    id: "endpoint-1",
+                    label: "192.168.1.100:8080",
+                    severity: 88,
+                    type: "endpoint",
+                  },
+                  {
+                    id: "api-1",
+                    label: "AccessibilityService",
+                    severity: 92,
+                    type: "api",
+                  },
+                  {
+                    id: "behavior-1",
+                    label: "Encrypted Payload",
+                    severity: 85,
+                    type: "behavior",
+                  },
+                ]}
+              />
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* Reasoning Tab */}
+        <TabsContent value="reasoning" className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <AIReasoningPanel />
+            <PremiumSOCCopilot />
+          </div>
+        </TabsContent>
+
+        {/* Report Tab */}
+        <TabsContent value="report" className="space-y-4">
+          <ExecutiveReportViewer
+            apkName="com.malicious.trojan.banking"
+            riskScore={Math.round(riskScore)}
+            timestamp={new Date()}
+            summary="This APK exhibits multiple indicators of malicious intent, including banking trojan behavior, SMS interception capabilities, and encrypted command-and-control communication. The application demonstrates sophisticated evasion techniques and poses a critical threat to financial security."
+            findings={[
+              "Accessibility service abuse detected for credential harvesting",
+              "SMS interception capabilities identified",
+              "Encrypted C2 communication mechanism discovered",
+              "Dynamic payload execution framework detected",
+              "Permission escalation vulnerabilities exploited",
+            ]}
+            recommendations={[
+              "Immediately remove APK from all affected devices",
+              "Reset all compromised financial credentials",
+              "Monitor for unauthorized transactions",
+              "Deploy enhanced behavioral detection rules",
+              "Implement SMS verification bypass protections",
+            ]}
+            timeline={[
+              { time: "00:00", event: "APK upload initiated" },
+              { time: "00:15", event: "Reverse engineering completed" },
+              { time: "00:30", event: "Malicious permissions detected" },
+              { time: "00:45", event: "C2 communication identified" },
+              { time: "01:00", event: "Risk assessment finalized" },
+            ]}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
