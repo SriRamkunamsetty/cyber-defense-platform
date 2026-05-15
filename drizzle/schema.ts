@@ -25,4 +25,77 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// TODO: Add your tables here
+// APK Analysis Investigation table
+export const investigations = mysqlTable("investigations", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull().references(() => users.id),
+  fileName: varchar("fileName", { length: 255 }).notNull(),
+  fileKey: varchar("fileKey", { length: 255 }).notNull(),
+  fileSize: int("fileSize"),
+  riskScore: int("riskScore").default(0),
+  riskLevel: mysqlEnum("riskLevel", ["low", "medium", "high", "critical"]).default("low"),
+  status: mysqlEnum("status", ["pending", "analyzing", "completed", "failed"]).default("pending"),
+  dataExfiltrationScore: int("dataExfiltrationScore").default(0),
+  credentialHarvestingScore: int("credentialHarvestingScore").default(0),
+  c2CommunicationScore: int("c2CommunicationScore").default(0),
+  bankingTrojanScore: int("bankingTrojanScore").default(0),
+  threatSummary: text("threatSummary"),
+  aiReasoning: text("aiReasoning"),
+  mitigationRecommendations: text("mitigationRecommendations"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  completedAt: timestamp("completedAt"),
+});
+
+export type Investigation = typeof investigations.$inferSelect;
+export type InsertInvestigation = typeof investigations.$inferInsert;
+
+// IOC (Indicators of Compromise) table
+export const iocs = mysqlTable("iocs", {
+  id: int("id").autoincrement().primaryKey(),
+  investigationId: int("investigationId").notNull().references(() => investigations.id),
+  type: mysqlEnum("type", [
+    "permission",
+    "network_endpoint",
+    "api_call",
+    "obfuscation_pattern",
+    "hardcoded_string",
+  ]).notNull(),
+  value: text("value").notNull(),
+  severity: mysqlEnum("severity", ["low", "medium", "high", "critical"]).default("medium"),
+  description: text("description"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type IOC = typeof iocs.$inferSelect;
+export type InsertIOC = typeof iocs.$inferInsert;
+
+// Agent Execution Log table
+export const agentLogs = mysqlTable("agentLogs", {
+  id: int("id").autoincrement().primaryKey(),
+  investigationId: int("investigationId").notNull().references(() => investigations.id),
+  agentName: varchar("agentName", { length: 255 }).notNull(),
+  status: mysqlEnum("status", ["pending", "running", "completed", "error"]).default("pending"),
+  progress: int("progress").default(0),
+  findings: text("findings"),
+  errorMessage: text("errorMessage"),
+  startedAt: timestamp("startedAt"),
+  completedAt: timestamp("completedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AgentLog = typeof agentLogs.$inferSelect;
+export type InsertAgentLog = typeof agentLogs.$inferInsert;
+
+// Chat Message table
+export const chatMessages = mysqlTable("chatMessages", {
+  id: int("id").autoincrement().primaryKey(),
+  investigationId: int("investigationId").notNull().references(() => investigations.id),
+  userId: int("userId").notNull().references(() => users.id),
+  role: mysqlEnum("role", ["user", "assistant"]).notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ChatMessage = typeof chatMessages.$inferSelect;
+export type InsertChatMessage = typeof chatMessages.$inferInsert;

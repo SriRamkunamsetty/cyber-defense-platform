@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, users, investigations, iocs, agentLogs, chatMessages } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -89,4 +89,177 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+// Investigation queries
+export async function createInvestigation(
+  userId: number,
+  fileName: string,
+  fileKey: string,
+  fileSize: number
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(investigations).values({
+    userId,
+    fileName,
+    fileKey,
+    fileSize,
+    status: "pending",
+  });
+
+  return result;
+}
+
+export async function getInvestigationById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db
+    .select()
+    .from(investigations)
+    .where(eq(investigations.id, id))
+    .limit(1);
+
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function getUserInvestigations(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db
+    .select()
+    .from(investigations)
+    .where(eq(investigations.userId, userId))
+    .orderBy(investigations.createdAt);
+}
+
+export async function updateInvestigationStatus(
+  id: number,
+  status: string,
+  riskScore?: number,
+  threatSummary?: string,
+  aiReasoning?: string
+) {
+  const db = await getDb();
+  if (!db) return;
+
+  const updates: Record<string, unknown> = { status };
+  if (riskScore !== undefined) updates.riskScore = riskScore;
+  if (threatSummary !== undefined) updates.threatSummary = threatSummary;
+  if (aiReasoning !== undefined) updates.aiReasoning = aiReasoning;
+  if (status === "completed") updates.completedAt = new Date();
+
+  await db.update(investigations).set(updates).where(eq(investigations.id, id));
+}
+
+// IOC queries
+export async function createIOC(
+  investigationId: number,
+  type: string,
+  value: string,
+  severity: string,
+  description?: string
+) {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.insert(iocs).values({
+    investigationId,
+    type: type as any,
+    value,
+    severity: severity as any,
+    description,
+  });
+}
+
+export async function getInvestigationIOCs(investigationId: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db
+    .select()
+    .from(iocs)
+    .where(eq(iocs.investigationId, investigationId));
+}
+
+// Agent log queries
+export async function createAgentLog(
+  investigationId: number,
+  agentName: string
+) {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.insert(agentLogs).values({
+    investigationId,
+    agentName,
+    status: "pending",
+  });
+}
+
+export async function updateAgentLog(
+  investigationId: number,
+  agentName: string,
+  status: string,
+  progress?: number,
+  findings?: string
+) {
+  const db = await getDb();
+  if (!db) return;
+
+  const updates: Record<string, unknown> = { status };
+  if (progress !== undefined) updates.progress = progress;
+  if (findings !== undefined) updates.findings = findings;
+  if (status === "running") updates.startedAt = new Date();
+  if (status === "completed") updates.completedAt = new Date();
+
+  await db
+    .update(agentLogs)
+    .set(updates)
+    .where(
+      and(
+        eq(agentLogs.investigationId, investigationId),
+        eq(agentLogs.agentName, agentName)
+      )
+    );
+}
+
+export async function getInvestigationAgentLogs(investigationId: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db
+    .select()
+    .from(agentLogs)
+    .where(eq(agentLogs.investigationId, investigationId));
+}
+
+// Chat message queries
+export async function createChatMessage(
+  investigationId: number,
+  userId: number,
+  role: string,
+  content: string
+) {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.insert(chatMessages).values({
+    investigationId,
+    userId,
+    role: role as any,
+    content,
+  });
+}
+
+export async function getInvestigationChatHistory(investigationId: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db
+    .select()
+    .from(chatMessages)
+    .where(eq(chatMessages.investigationId, investigationId))
+    .orderBy(chatMessages.createdAt);
+}
