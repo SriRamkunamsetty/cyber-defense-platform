@@ -85,6 +85,10 @@ export function useInvestigationWebSocket({
       ws.current.onclose = () => {
         console.log("[WebSocket] Disconnected");
         setIsConnected(false);
+        // Auto-reconnect after brief delay if still on same investigation
+        if (investigationId) {
+          setTimeout(() => connect(), 3000);
+        }
       };
     } catch (error) {
       const err =

@@ -2,6 +2,8 @@
 
 Run the full end-to-end malware investigation workflow on your machine.
 
+> **Full project guide (architecture, diagrams, glossary):** [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md)
+
 ## Prerequisites
 
 - **Node.js 20+** and npm
