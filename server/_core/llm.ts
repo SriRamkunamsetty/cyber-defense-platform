@@ -1,4 +1,5 @@
 import { ENV } from "./env";
+import { isLocalDev } from "./localDev";
 
 export type Role = "system" | "user" | "assistant" | "tool" | "function";
 
@@ -216,9 +217,77 @@ const resolveApiUrl = () =>
 
 const assertApiKey = () => {
   if (!ENV.forgeApiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
+    if (isLocalDev()) {
+      return;
+    }
+    throw new Error(
+      "BUILT_IN_FORGE_API_KEY is not configured. Set it in .env or use LOCAL_DEV=true for mock AI."
+    );
   }
 };
+
+function buildLocalMockResponse(messages: Message[]): InvokeResult {
+  const userMsg = messages.find((m) => m.role === "user");
+  const userText =
+    typeof userMsg?.content === "string"
+      ? userMsg.content
+      : JSON.stringify(userMsg?.content ?? "");
+
+  const evidenceMatch = userText.match(/FORENSIC EVIDENCE[\s\S]*?(\{[\s\S]*\})/);
+  let evidenceSummary = "forensic evidence from APK analysis";
+  if (evidenceMatch) {
+    try {
+      const pkg = JSON.parse(evidenceMatch[1]).package;
+      evidenceSummary = `package ${pkg} with extracted permissions, suspicious methods, and IOCs`;
+    } catch {
+      evidenceSummary = "extracted APK forensic artifacts";
+    }
+  }
+
+  const isRiskAgent = userText.includes("Risk Scoring");
+  const content = isRiskAgent
+    ? JSON.stringify({
+        overallScore: 72,
+        dataExfiltration: 65,
+        credentialHarvesting: 78,
+        c2Communication: 55,
+        bankingTrojan: 80,
+        riskLevel: "high",
+        justification: `Scores derived from cited evidence: ${evidenceSummary}. Mock mode — set BUILT_IN_FORGE_API_KEY for live Gemini.`,
+        summary: `Evidence-based risk assessment for ${evidenceSummary}`,
+        threatLevel: "high",
+        confidence: 82,
+        evidence: ["Permissions and API patterns from forensic extraction"],
+        mitigations: ["Block package at MDM", "Reset credentials if installed"],
+      })
+    : JSON.stringify({
+        summary: `Based strictly on forensic evidence (${evidenceSummary}), the APK exhibits behaviors consistent with Android banking-fraud malware, including high-risk permission combinations and suspicious API usage patterns identified during static analysis. [LOCAL_DEV mock — configure BUILT_IN_FORGE_API_KEY for live Gemini reasoning.]`,
+        threatLevel: "high",
+        confidence: 80,
+        evidence: [
+          "Findings reference only extracted manifest, permissions, and decompiled patterns",
+        ],
+        mitigations: [
+          "Quarantine APK from enterprise devices",
+          "Monitor network for extracted IOCs",
+        ],
+        malwareCategory: "Android banking trojan (suspected)",
+        attackVectors: ["permission_abuse", "sms_interception", "overlay_phishing"],
+      });
+
+  return {
+    id: "local-mock",
+    created: Date.now(),
+    model: "local-mock-grounded",
+    choices: [
+      {
+        index: 0,
+        message: { role: "assistant", content },
+        finish_reason: "stop",
+      },
+    ],
+  };
+}
 
 const normalizeResponseFormat = ({
   responseFormat,
@@ -268,8 +337,14 @@ const normalizeResponseFormat = ({
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   assertApiKey();
 
+  const { messages } = params;
+
+  if (isLocalDev() && !ENV.forgeApiKey) {
+    console.warn("[LLM] Using LOCAL_DEV grounded mock (no BUILT_IN_FORGE_API_KEY)");
+    return buildLocalMockResponse(messages);
+  }
+
   const {
-    messages,
     tools,
     toolChoice,
     tool_choice,

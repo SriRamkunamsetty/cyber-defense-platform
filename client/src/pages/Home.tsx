@@ -1,4 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
+import { getDevLoginUrl, isLocalDevClient } from "@/const";
 import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
 import { Zap, Shield, Brain, Radar, TrendingUp, Lock } from "lucide-react";
@@ -35,7 +36,7 @@ export default function Home() {
         <div className="container flex items-center justify-between h-16">
           <div className="flex items-center gap-2">
             <Shield className="w-6 h-6 text-cyan-400" />
-            <span className="text-xl font-bold text-neon">CyberDefense AI</span>
+            <span className="text-xl font-bold text-neon">TRINETRA AI</span>
           </div>
           <div className="flex items-center gap-4">
             {isAuthenticated ? (
@@ -43,6 +44,9 @@ export default function Home() {
                 <span className="text-sm text-muted-foreground">
                   Welcome, {user?.name || "User"}
                 </span>
+                <Button variant="ghost" onClick={() => navigate("/history")}>
+                  History
+                </Button>
                 <Button
                   onClick={() => navigate("/dashboard")}
                   className="btn-cyber"
@@ -50,6 +54,15 @@ export default function Home() {
                   Dashboard
                 </Button>
               </>
+            ) : isLocalDevClient ? (
+              <Button
+                onClick={() => {
+                  window.location.href = getDevLoginUrl("/dashboard");
+                }}
+                className="btn-cyber"
+              >
+                Dev Login & Start
+              </Button>
             ) : (
               <Button
                 onClick={() => navigate("/dashboard")}
@@ -250,7 +263,7 @@ export default function Home() {
       <footer className="border-t border-white/10 py-8 px-4 text-center text-sm text-muted-foreground">
         <div className="container">
           <p>
-            CyberDefense AI © 2026. Enterprise-grade malware analysis platform.
+            TRINETRA AI © 2026. Enterprise-grade malware intelligence platform.
           </p>
         </div>
       </footer>

@@ -7,4 +7,7 @@ export const ENV = {
   isProduction: process.env.NODE_ENV === "production",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  localDev:
+    process.env.LOCAL_DEV === "true" || process.env.LOCAL_DEV === "1",
+  port: parseInt(process.env.PORT || "3000", 10),
 };

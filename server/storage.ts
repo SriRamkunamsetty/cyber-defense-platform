@@ -1,8 +1,9 @@
-// Preconfigured storage helpers for Manus WebDev templates
-// Uploads via Forge Server presigned URL to S3 (PUT direct).
-// Downloads return /manus-storage/{key} paths served via 307 redirect.
+// Storage: Forge S3 presign (production) or local filesystem (LOCAL_DEV=true)
 
+import fs from "fs/promises";
+import path from "path";
 import { ENV } from "./_core/env";
+import { isLocalDev, LOCAL_STORAGE_DIR } from "./_core/localDev";
 
 function getForgeConfig() {
   const forgeUrl = ENV.forgeApiUrl;
@@ -10,7 +11,7 @@ function getForgeConfig() {
 
   if (!forgeUrl || !forgeKey) {
     throw new Error(
-      "Storage config missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY",
+      "Storage config missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY, or enable LOCAL_DEV=true"
     );
   }
 
@@ -28,15 +29,36 @@ function appendHashSuffix(relKey: string): string {
   return `${relKey.slice(0, lastDot)}_${hash}${relKey.slice(lastDot)}`;
 }
 
+async function localStoragePut(
+  relKey: string,
+  data: Buffer,
+  _contentType: string
+): Promise<{ key: string; url: string }> {
+  const key = appendHashSuffix(normalizeKey(relKey));
+  const filePath = path.join(LOCAL_STORAGE_DIR, key);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, data);
+  return { key, url: `/api/local-files/${encodeURIComponent(key)}` };
+}
+
 export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,
-  contentType = "application/octet-stream",
+  contentType = "application/octet-stream"
 ): Promise<{ key: string; url: string }> {
+  const buffer = Buffer.isBuffer(data)
+    ? data
+    : typeof data === "string"
+      ? Buffer.from(data)
+      : Buffer.from(data);
+
+  if (isLocalDev()) {
+    return localStoragePut(relKey, buffer, contentType);
+  }
+
   const { forgeUrl, forgeKey } = getForgeConfig();
   const key = appendHashSuffix(normalizeKey(relKey));
 
-  // 1. Get presigned PUT URL from Forge
   const presignUrl = new URL("v1/storage/presign/put", forgeUrl + "/");
   presignUrl.searchParams.set("path", key);
 
@@ -52,16 +74,10 @@ export async function storagePut(
   const { url: s3Url } = (await presignResp.json()) as { url: string };
   if (!s3Url) throw new Error("Forge returned empty presign URL");
 
-  // 2. PUT file directly to S3
-  const blob =
-    typeof data === "string"
-      ? new Blob([data], { type: contentType })
-      : new Blob([data as any], { type: contentType });
-
   const uploadResp = await fetch(s3Url, {
     method: "PUT",
     headers: { "Content-Type": contentType },
-    body: blob,
+    body: buffer,
   });
 
   if (!uploadResp.ok) {
@@ -73,13 +89,20 @@ export async function storagePut(
 
 export async function storageGet(relKey: string): Promise<{ key: string; url: string }> {
   const key = normalizeKey(relKey);
+  if (isLocalDev()) {
+    return { key, url: `/api/local-files/${encodeURIComponent(key)}` };
+  }
   return { key, url: `/manus-storage/${key}` };
 }
 
 export async function storageGetSignedUrl(relKey: string): Promise<string> {
-  const { forgeUrl, forgeKey } = getForgeConfig();
   const key = normalizeKey(relKey);
 
+  if (isLocalDev()) {
+    return `http://127.0.0.1:${ENV.port}/api/local-files/${encodeURIComponent(key)}`;
+  }
+
+  const { forgeUrl, forgeKey } = getForgeConfig();
   const getUrl = new URL("v1/storage/presign/get", forgeUrl + "/");
   getUrl.searchParams.set("path", key);
 
@@ -94,4 +117,21 @@ export async function storageGetSignedUrl(relKey: string): Promise<string> {
 
   const { url } = (await resp.json()) as { url: string };
   return url;
+}
+
+/** Read APK bytes directly (preferred for local pipeline). */
+export async function storageGetBuffer(relKey: string): Promise<Buffer> {
+  const key = normalizeKey(relKey);
+
+  if (isLocalDev()) {
+    const filePath = path.join(LOCAL_STORAGE_DIR, key);
+    return fs.readFile(filePath);
+  }
+
+  const signedUrl = await storageGetSignedUrl(key);
+  const response = await fetch(signedUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to download file: ${response.status}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
 }

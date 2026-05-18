@@ -1,6 +1,9 @@
 import { runAnalysisPipeline } from "./aiEngine";
+import { analyzeApkBuffer } from "./apkAnalyzer";
 import { broadcastInvestigationEvent } from "../websocket";
 import { notifyOwner } from "../_core/notification";
+import { storageGetBuffer } from "../storage";
+import { updateInvestigationStatus } from "../db";
 
 export interface InvestigationRequest {
   investigationId: number;
@@ -9,47 +12,57 @@ export interface InvestigationRequest {
   userId: number;
 }
 
+async function downloadApk(fileKey: string): Promise<Buffer> {
+  return storageGetBuffer(fileKey);
+}
+
 /**
- * Runs the complete investigation pipeline asynchronously.
- * Broadcasts WebSocket events for real-time progress updates.
- * Sends critical risk alerts if score > 80.
+ * Runs the complete investigation pipeline: download APK → forensic analysis → grounded AI agents.
  */
 export async function runInvestigation(
   request: InvestigationRequest
 ): Promise<void> {
-  const { investigationId, apkFileName, apkFileKey, userId } = request;
+  const { investigationId, apkFileName, apkFileKey } = request;
 
   try {
-    // Notify clients that analysis is starting
     broadcastInvestigationEvent({
-      type: "investigation_complete",
+      type: "agent_start",
       investigationId,
+      message: "Investigation pipeline starting",
       timestamp: new Date().toISOString(),
-      message: "Analysis pipeline starting",
     });
 
-    // Run the multi-agent analysis pipeline
+    await updateInvestigationStatus(investigationId, "analyzing");
+
+    const onLog = (message: string, progress?: number) => {
+      broadcastInvestigationEvent({
+        type: "agent_progress",
+        investigationId,
+        message,
+        progress,
+        timestamp: new Date().toISOString(),
+      });
+    };
+
+    onLog("Downloading APK from secure storage", 2);
+    const apkBuffer = await downloadApk(apkFileKey);
+    onLog("APK retrieved — beginning reverse engineering", 5);
+
+    const evidence = await analyzeApkBuffer(apkBuffer, apkFileName, onLog);
+
+    await updateInvestigationStatus(investigationId, "analyzing", {
+      packageName: evidence.packageName,
+      evidence,
+      sha256Hash: evidence.sha256,
+    });
+
     const result = await runAnalysisPipeline(
       investigationId,
       apkFileName,
-      `File Key: ${apkFileKey}`
+      evidence,
+      onLog
     );
 
-    // Broadcast completion
-    broadcastInvestigationEvent({
-      type: "investigation_complete",
-      investigationId,
-      timestamp: new Date().toISOString(),
-      data: {
-        riskScore: result.riskScore,
-        riskBreakdown: result.riskBreakdown,
-        threatSummary: result.threatSummary,
-        mitigations: result.mitigations,
-        iocCount: result.iocs.length,
-      },
-    });
-
-    // Send critical risk alert if score > 80
     if (result.riskScore > 80) {
       const topThreats = result.iocs
         .filter((ioc) => ioc.severity === "high" || ioc.severity === "critical")
@@ -58,14 +71,15 @@ export async function runInvestigation(
         .join(", ");
 
       await notifyOwner({
-        title: `🚨 Critical Risk Alert: ${apkFileName}`,
-        content: `Risk Score: ${result.riskScore}/100\n\nTop Threats:\n${topThreats}\n\nImmediate review recommended.`,
+        title: `Critical Risk Alert: ${apkFileName}`,
+        content: `Risk Score: ${result.riskScore}/100\nPackage: ${evidence.packageName}\n\nTop Threats:\n${topThreats || "Multiple critical indicators"}\n\nImmediate review recommended.`,
       });
     }
   } catch (error) {
     console.error(`Investigation ${investigationId} failed:`, error);
 
-    // Broadcast error
+    await updateInvestigationStatus(investigationId, "failed");
+
     broadcastInvestigationEvent({
       type: "investigation_error",
       investigationId,
@@ -75,17 +89,11 @@ export async function runInvestigation(
   }
 }
 
-/**
- * Runs investigation asynchronously without blocking the request.
- */
 export function runInvestigationAsync(
   request: InvestigationRequest
 ): Promise<void> {
-  // Fire and forget - don't await
   runInvestigation(request).catch((error) => {
     console.error("Async investigation failed:", error);
   });
-
-  // Return immediately
   return Promise.resolve();
 }

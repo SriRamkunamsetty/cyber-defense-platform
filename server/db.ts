@@ -1,11 +1,18 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, investigations, iocs, agentLogs, chatMessages } from "../drizzle/schema";
-import { ENV } from './_core/env';
+import {
+  InsertUser,
+  users,
+  investigations,
+  iocs,
+  agentLogs,
+  chatMessages,
+} from "../drizzle/schema";
+import { ENV } from "./_core/env";
+import type { ApkEvidence, AttackChainStep, RiskScoreResult } from "../shared/evidence";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
-// Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
@@ -30,9 +37,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   }
 
   try {
-    const values: InsertUser = {
-      openId: user.openId,
-    };
+    const values: InsertUser = { openId: user.openId };
     const updateSet: Record<string, unknown> = {};
 
     const textFields = ["name", "email", "loginMethod"] as const;
@@ -56,8 +61,8 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       values.role = user.role;
       updateSet.role = user.role;
     } else if (user.openId === ENV.ownerOpenId) {
-      values.role = 'admin';
-      updateSet.role = 'admin';
+      values.role = "admin";
+      updateSet.role = "admin";
     }
 
     if (!values.lastSignedIn) {
@@ -79,35 +84,47 @@ export async function upsertUser(user: InsertUser): Promise<void> {
 
 export async function getUserByOpenId(openId: string) {
   const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot get user: database not available");
-    return undefined;
-  }
+  if (!db) return undefined;
 
-  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
+  const result = await db
+    .select()
+    .from(users)
+    .where(eq(users.openId, openId))
+    .limit(1);
 
   return result.length > 0 ? result[0] : undefined;
 }
 
-// Investigation queries
 export async function createInvestigation(
   userId: number,
   fileName: string,
   fileKey: string,
   fileSize: number
-) {
+): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  const result = await db.insert(investigations).values({
-    userId,
-    fileName,
-    fileKey,
-    fileSize,
-    status: "pending",
-  });
+  const result = await db
+    .insert(investigations)
+    .values({
+      userId,
+      fileName,
+      fileKey,
+      fileSize,
+      status: "pending",
+    })
+    .$returningId();
 
-  return result;
+  const insertId = Number(result.id);
+  if (insertId) return insertId;
+
+  const rows = await db
+    .select({ id: investigations.id })
+    .from(investigations)
+    .where(eq(investigations.userId, userId))
+    .orderBy(desc(investigations.createdAt))
+    .limit(1);
+  return rows[0]?.id ?? 0;
 }
 
 export async function getInvestigationById(id: number) {
@@ -131,29 +148,59 @@ export async function getUserInvestigations(userId: number) {
     .select()
     .from(investigations)
     .where(eq(investigations.userId, userId))
-    .orderBy(investigations.createdAt);
+    .orderBy(desc(investigations.createdAt));
 }
 
 export async function updateInvestigationStatus(
   id: number,
   status: string,
-  riskScore?: number,
-  threatSummary?: string,
-  aiReasoning?: string
+  options?: {
+    riskScore?: number;
+    riskLevel?: string;
+    threatSummary?: string;
+    aiReasoning?: string;
+    mitigations?: string[];
+    packageName?: string;
+    evidence?: ApkEvidence;
+    attackChain?: AttackChainStep[];
+    riskBreakdown?: RiskScoreResult;
+    sha256Hash?: string;
+  }
 ) {
   const db = await getDb();
   if (!db) return;
 
   const updates: Record<string, unknown> = { status };
-  if (riskScore !== undefined) updates.riskScore = riskScore;
-  if (threatSummary !== undefined) updates.threatSummary = threatSummary;
-  if (aiReasoning !== undefined) updates.aiReasoning = aiReasoning;
-  if (status === "completed") updates.completedAt = new Date();
+  if (options?.riskScore !== undefined) updates.riskScore = options.riskScore;
+  if (options?.riskLevel !== undefined) updates.riskLevel = options.riskLevel;
+  if (options?.threatSummary !== undefined)
+    updates.threatSummary = options.threatSummary;
+  if (options?.aiReasoning !== undefined) updates.aiReasoning = options.aiReasoning;
+  if (options?.mitigations !== undefined)
+    updates.mitigationRecommendations = JSON.stringify(options.mitigations);
+  if (options?.packageName !== undefined) updates.packageName = options.packageName;
+  if (options?.sha256Hash !== undefined) updates.sha256Hash = options.sha256Hash;
+  if (options?.evidence) {
+    updates.evidenceJson = JSON.stringify(options.evidence);
+    updates.fileTreeJson = JSON.stringify(options.evidence.fileTree);
+  }
+  if (options?.attackChain) {
+    updates.attackChainJson = JSON.stringify(options.attackChain);
+  }
+  if (options?.riskBreakdown) {
+    updates.dataExfiltrationScore = options.riskBreakdown.dataExfiltration;
+    updates.credentialHarvestingScore = options.riskBreakdown.credentialHarvesting;
+    updates.c2CommunicationScore = options.riskBreakdown.c2Communication;
+    updates.bankingTrojanScore = options.riskBreakdown.bankingTrojan;
+    updates.riskLevel = options.riskBreakdown.riskLevel;
+  }
+  if (status === "completed" || status === "failed") {
+    updates.completedAt = new Date();
+  }
 
   await db.update(investigations).set(updates).where(eq(investigations.id, id));
 }
 
-// IOC queries
 export async function createIOC(
   investigationId: number,
   type: string,
@@ -166,9 +213,9 @@ export async function createIOC(
 
   await db.insert(iocs).values({
     investigationId,
-    type: type as any,
+    type: type as "permission",
     value,
-    severity: severity as any,
+    severity: severity as "medium",
     description,
   });
 }
@@ -183,11 +230,10 @@ export async function getInvestigationIOCs(investigationId: number) {
     .where(eq(iocs.investigationId, investigationId));
 }
 
-// Agent log queries
 export async function createAgentLog(
   investigationId: number,
   agentName: string
-) {
+): Promise<void> {
   const db = await getDb();
   if (!db) return;
 
@@ -195,7 +241,14 @@ export async function createAgentLog(
     investigationId,
     agentName,
     status: "pending",
+    progress: 0,
   });
+}
+
+export async function initializeAgentLogs(investigationId: number, agentNames: string[]) {
+  for (const name of agentNames) {
+    await createAgentLog(investigationId, name);
+  }
 }
 
 export async function updateAgentLog(
@@ -203,7 +256,8 @@ export async function updateAgentLog(
   agentName: string,
   status: string,
   progress?: number,
-  findings?: string
+  findings?: string,
+  errorMessage?: string
 ) {
   const db = await getDb();
   if (!db) return;
@@ -211,8 +265,9 @@ export async function updateAgentLog(
   const updates: Record<string, unknown> = { status };
   if (progress !== undefined) updates.progress = progress;
   if (findings !== undefined) updates.findings = findings;
+  if (errorMessage !== undefined) updates.errorMessage = errorMessage;
   if (status === "running") updates.startedAt = new Date();
-  if (status === "completed") updates.completedAt = new Date();
+  if (status === "completed" || status === "error") updates.completedAt = new Date();
 
   await db
     .update(agentLogs)
@@ -235,7 +290,6 @@ export async function getInvestigationAgentLogs(investigationId: number) {
     .where(eq(agentLogs.investigationId, investigationId));
 }
 
-// Chat message queries
 export async function createChatMessage(
   investigationId: number,
   userId: number,
@@ -248,7 +302,7 @@ export async function createChatMessage(
   await db.insert(chatMessages).values({
     investigationId,
     userId,
-    role: role as any,
+    role: role as "user",
     content,
   });
 }
@@ -262,4 +316,32 @@ export async function getInvestigationChatHistory(investigationId: number) {
     .from(chatMessages)
     .where(eq(chatMessages.investigationId, investigationId))
     .orderBy(chatMessages.createdAt);
+}
+
+export function parseInvestigationEvidence(
+  investigation: { evidenceJson?: string | null; fileTreeJson?: string | null; attackChainJson?: string | null }
+): {
+  evidence: ApkEvidence | null;
+  attackChain: AttackChainStep[];
+} {
+  let evidence: ApkEvidence | null = null;
+  let attackChain: AttackChainStep[] = [];
+
+  try {
+    if (investigation.evidenceJson) {
+      evidence = JSON.parse(investigation.evidenceJson) as ApkEvidence;
+    }
+  } catch {
+    evidence = null;
+  }
+
+  try {
+    if (investigation.attackChainJson) {
+      attackChain = JSON.parse(investigation.attackChainJson) as AttackChainStep[];
+    }
+  } catch {
+    attackChain = [];
+  }
+
+  return { evidence, attackChain };
 }

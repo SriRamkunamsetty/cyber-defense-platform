@@ -1,127 +1,130 @@
 import { z } from "zod";
-import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
+import { protectedProcedure, router } from "../_core/trpc";
 import {
   createInvestigation,
   getInvestigationById,
   getUserInvestigations,
-  updateInvestigationStatus,
   getInvestigationIOCs,
   getInvestigationAgentLogs,
   getInvestigationChatHistory,
   createChatMessage,
+  parseInvestigationEvidence,
 } from "../db";
 import { storagePut } from "../storage";
 import { runInvestigationAsync } from "../analysis/investigationService";
+import { askSocCopilot } from "../analysis/aiEngine";
 
 export const investigationRouter = router({
-  // Create a new investigation from APK upload
   createFromUpload: protectedProcedure
     .input(
       z.object({
         fileName: z.string(),
-        fileData: z.instanceof(Buffer),
+        fileData: z.union([
+          z.instanceof(Buffer),
+          z.instanceof(Uint8Array),
+        ]),
         fileSize: z.number(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      try {
-        // Store file in S3
-        const fileKey = `apk-files/${ctx.user.id}/${Date.now()}-${input.fileName}`;
-        const { url } = await storagePut(fileKey, input.fileData, "application/vnd.android.package-archive");
-
-        // Create investigation record
-        await createInvestigation(
-          ctx.user.id,
-          input.fileName,
-          fileKey,
-          input.fileSize
-        );
-
-        // Get the investigation we just created
-        const investigations = await getUserInvestigations(ctx.user.id);
-        const newInvestigation = investigations[investigations.length - 1];
-
-        // Start analysis pipeline asynchronously
-        if (newInvestigation?.id) {
-          runInvestigationAsync({
-            investigationId: newInvestigation.id,
-            apkFileName: input.fileName,
-            apkFileKey: fileKey,
-            userId: ctx.user.id,
-          }).catch((error) => {
-            console.error("Failed to start investigation:", error);
-          });
-        }
-
-        return {
-          success: true,
-          investigationId: newInvestigation?.id || 0,
-          fileUrl: url,
-          fileKey,
-        };
-      } catch (error) {
-        console.error("Failed to create investigation:", error);
-        throw new Error("Failed to upload and create investigation");
+      if (!input.fileName.toLowerCase().endsWith(".apk")) {
+        throw new Error("Only APK files are supported");
       }
+      if (input.fileSize > 50 * 1024 * 1024) {
+        throw new Error("APK file exceeds 50MB limit");
+      }
+
+      const fileBuffer = Buffer.isBuffer(input.fileData)
+        ? input.fileData
+        : Buffer.from(input.fileData);
+
+      const fileKey = `apk-files/${ctx.user.id}/${Date.now()}-${input.fileName}`;
+      const { url } = await storagePut(
+        fileKey,
+        fileBuffer,
+        "application/vnd.android.package-archive"
+      );
+
+      const investigationId = await createInvestigation(
+        ctx.user.id,
+        input.fileName,
+        fileKey,
+        input.fileSize
+      );
+
+      if (!investigationId) {
+        throw new Error("Failed to create investigation record");
+      }
+
+      runInvestigationAsync({
+        investigationId,
+        apkFileName: input.fileName,
+        apkFileKey: fileKey,
+        userId: ctx.user.id,
+      });
+
+      return {
+        success: true,
+        investigationId,
+        fileUrl: url,
+        fileKey,
+      };
     }),
 
-  // Get investigation by ID
   getById: protectedProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
       const investigation = await getInvestigationById(input.id);
-
-      if (!investigation) {
-        throw new Error("Investigation not found");
-      }
-
-      // Verify ownership
-      if (investigation.userId !== ctx.user.id) {
-        throw new Error("Unauthorized");
-      }
-
+      if (!investigation) throw new Error("Investigation not found");
+      if (investigation.userId !== ctx.user.id) throw new Error("Unauthorized");
       return investigation;
     }),
 
-  // Get user's investigations
   listUserInvestigations: protectedProcedure.query(async ({ ctx }) => {
     return await getUserInvestigations(ctx.user.id);
   }),
 
-  // Get investigation with all details
   getWithDetails: protectedProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
       const investigation = await getInvestigationById(input.id);
-
       if (!investigation || investigation.userId !== ctx.user.id) {
         throw new Error("Investigation not found or unauthorized");
       }
 
       const iocs = await getInvestigationIOCs(input.id);
       const agentLogs = await getInvestigationAgentLogs(input.id);
+      const { evidence, attackChain } = parseInvestigationEvidence(investigation);
+
+      let mitigations: string[] = [];
+      try {
+        if (investigation.mitigationRecommendations) {
+          mitigations = JSON.parse(investigation.mitigationRecommendations);
+        }
+      } catch {
+        mitigations = [];
+      }
 
       return {
         investigation,
         iocs,
         agentLogs,
+        evidence,
+        attackChain,
+        mitigations,
       };
     }),
 
-  // Get chat history for investigation
   getChatHistory: protectedProcedure
     .input(z.object({ investigationId: z.number() }))
     .query(async ({ ctx, input }) => {
       const investigation = await getInvestigationById(input.investigationId);
-
       if (!investigation || investigation.userId !== ctx.user.id) {
         throw new Error("Unauthorized");
       }
-
       return await getInvestigationChatHistory(input.investigationId);
     }),
 
-  // Add chat message
   addChatMessage: protectedProcedure
     .input(
       z.object({
@@ -132,41 +135,56 @@ export const investigationRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const investigation = await getInvestigationById(input.investigationId);
-
       if (!investigation || investigation.userId !== ctx.user.id) {
         throw new Error("Unauthorized");
       }
-
       await createChatMessage(
         input.investigationId,
         ctx.user.id,
         input.role,
         input.content
       );
-
       return { success: true };
     }),
 
-  // Update investigation status (for backend use)
-  updateStatus: publicProcedure
+  askCopilot: protectedProcedure
     .input(
       z.object({
-        id: z.number(),
-        status: z.enum(["pending", "analyzing", "completed", "failed"]),
-        riskScore: z.number().optional(),
-        threatSummary: z.string().optional(),
-        aiReasoning: z.string().optional(),
+        investigationId: z.number(),
+        query: z.string().min(1).max(4000),
       })
     )
-    .mutation(async ({ input }) => {
-      await updateInvestigationStatus(
-        input.id,
-        input.status,
-        input.riskScore,
-        input.threatSummary,
-        input.aiReasoning
+    .mutation(async ({ ctx, input }) => {
+      const investigation = await getInvestigationById(input.investigationId);
+      if (!investigation || investigation.userId !== ctx.user.id) {
+        throw new Error("Unauthorized");
+      }
+
+      const { evidence } = parseInvestigationEvidence(investigation);
+      const history = await getInvestigationChatHistory(input.investigationId);
+
+      await createChatMessage(
+        input.investigationId,
+        ctx.user.id,
+        "user",
+        input.query
       );
 
-      return { success: true };
+      const response = await askSocCopilot(
+        input.investigationId,
+        evidence,
+        investigation.aiReasoning || investigation.threatSummary || "",
+        input.query,
+        history.map((m) => ({ role: m.role, content: m.content }))
+      );
+
+      await createChatMessage(
+        input.investigationId,
+        ctx.user.id,
+        "assistant",
+        response
+      );
+
+      return { response };
     }),
 });

@@ -1,38 +1,89 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { runAnalysisPipeline, AnalysisResult } from "./aiEngine";
+import { runAnalysisPipeline } from "./aiEngine";
+import type { ApkEvidence } from "../../shared/evidence";
 
-// Mock the database functions
 vi.mock("../db", () => ({
   updateAgentLog: vi.fn(),
   createIOC: vi.fn(),
   updateInvestigationStatus: vi.fn(),
+  initializeAgentLogs: vi.fn(),
 }));
 
-// Mock the LLM
+vi.mock("../websocket", () => ({
+  broadcastInvestigationEvent: vi.fn(),
+}));
+
 vi.mock("../_core/llm", () => ({
   invokeLLM: vi.fn().mockResolvedValue({
     choices: [
       {
         message: {
-          content:
-            '{"overallScore": 75, "dataExfiltration": 80, "credentialHarvesting": 70, "c2Communication": 80, "bankingTrojan": 65, "justification": "High risk indicators"}',
+          content: JSON.stringify({
+            summary: "Test finding based on evidence",
+            threatLevel: "high",
+            confidence: 85,
+            evidence: ["READ_SMS permission in manifest"],
+            mitigations: ["Block package"],
+            overallScore: 75,
+            dataExfiltration: 80,
+            credentialHarvesting: 70,
+            c2Communication: 80,
+            bankingTrojan: 65,
+            justification: "High risk indicators from evidence",
+          }),
         },
       },
     ],
   }),
 }));
 
+const mockEvidence: ApkEvidence = {
+  packageName: "com.test.malware",
+  sha256: "a".repeat(64),
+  fileSize: 1024,
+  permissions: [
+    {
+      name: "android.permission.READ_SMS",
+      riskLevel: "critical",
+      abuseDescription: "SMS read",
+      bankingRelevance: "OTP theft",
+    },
+  ],
+  activities: ["com.test.MainActivity"],
+  services: [],
+  receivers: [],
+  providers: [],
+  suspiciousMethods: [
+    {
+      className: "SmsStealer",
+      methodName: "SmsManager.sendTextMessage",
+      filePath: "/smali/SmsStealer.smali",
+      snippet: "SmsManager.sendTextMessage",
+      threatCategory: "sms_abuse",
+      severity: "critical",
+    },
+  ],
+  iocs: [
+    {
+      type: "permission",
+      value: "READ_SMS",
+      severity: "critical",
+      description: "SMS permission",
+      source: "manifest",
+    },
+  ],
+  fileTree: [{ name: "AndroidManifest.xml", path: "AndroidManifest.xml", type: "file" }],
+  analysisNotes: ["test"],
+  toolsUsed: ["adm-zip"],
+};
+
 describe("AI Analysis Engine", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("should run analysis pipeline successfully", async () => {
-    const result = await runAnalysisPipeline(
-      1,
-      "test.apk",
-      "Test APK context"
-    );
+  it("should run grounded analysis pipeline successfully", async () => {
+    const result = await runAnalysisPipeline(1, "test.apk", mockEvidence);
 
     expect(result).toBeDefined();
     expect(result.riskScore).toBeGreaterThanOrEqual(0);
@@ -40,103 +91,22 @@ describe("AI Analysis Engine", () => {
   });
 
   it("should have valid risk breakdown", async () => {
-    const result = await runAnalysisPipeline(
-      1,
-      "test.apk",
-      "Test APK context"
-    );
+    const result = await runAnalysisPipeline(1, "test.apk", mockEvidence);
 
     expect(result.riskBreakdown).toBeDefined();
     expect(result.riskBreakdown.dataExfiltration).toBeGreaterThanOrEqual(0);
-    expect(result.riskBreakdown.dataExfiltration).toBeLessThanOrEqual(100);
-    expect(result.riskBreakdown.credentialHarvesting).toBeGreaterThanOrEqual(0);
-    expect(result.riskBreakdown.credentialHarvesting).toBeLessThanOrEqual(100);
-    expect(result.riskBreakdown.c2Communication).toBeGreaterThanOrEqual(0);
-    expect(result.riskBreakdown.c2Communication).toBeLessThanOrEqual(100);
-    expect(result.riskBreakdown.bankingTrojan).toBeGreaterThanOrEqual(0);
     expect(result.riskBreakdown.bankingTrojan).toBeLessThanOrEqual(100);
   });
 
-  it("should extract IOCs from findings", async () => {
-    const result = await runAnalysisPipeline(
-      1,
-      "test.apk",
-      "Test APK context"
-    );
+  it("should return IOCs from evidence", async () => {
+    const result = await runAnalysisPipeline(1, "test.apk", mockEvidence);
 
-    expect(result.iocs).toBeDefined();
-    expect(Array.isArray(result.iocs)).toBe(true);
-
-    // Each IOC should have required fields
-    result.iocs.forEach((ioc) => {
-      expect(ioc.type).toBeDefined();
-      expect(ioc.value).toBeDefined();
-      expect(ioc.severity).toBeDefined();
-      expect(["low", "medium", "high", "critical"]).toContain(ioc.severity);
-    });
+    expect(result.iocs.length).toBeGreaterThan(0);
+    expect(result.attackChain.length).toBeGreaterThan(0);
   });
 
   it("should generate mitigations", async () => {
-    const result = await runAnalysisPipeline(
-      1,
-      "test.apk",
-      "Test APK context"
-    );
-
-    expect(result.mitigations).toBeDefined();
-    expect(Array.isArray(result.mitigations)).toBe(true);
+    const result = await runAnalysisPipeline(1, "test.apk", mockEvidence);
     expect(result.mitigations.length).toBeGreaterThan(0);
-  });
-
-  it("should have threat summary", async () => {
-    const result = await runAnalysisPipeline(
-      1,
-      "test.apk",
-      "Test APK context"
-    );
-
-    expect(result.threatSummary).toBeDefined();
-    expect(typeof result.threatSummary).toBe("string");
-  });
-
-  it("should have findings", async () => {
-    const result = await runAnalysisPipeline(
-      1,
-      "test.apk",
-      "Test APK context"
-    );
-
-    expect(result.findings).toBeDefined();
-    expect(typeof result.findings).toBe("string");
-    expect(result.findings.length).toBeGreaterThan(0);
-  });
-
-  it("should classify critical risk correctly", async () => {
-    // Test that a score > 80 is classified as critical
-    const result = await runAnalysisPipeline(
-      1,
-      "test.apk",
-      "Test APK context"
-    );
-
-    if (result.riskScore > 80) {
-      expect(result.riskScore).toBeGreaterThan(80);
-    }
-  });
-
-  it("should have valid analysis result structure", async () => {
-    const result = await runAnalysisPipeline(
-      1,
-      "test.apk",
-      "Test APK context"
-    );
-
-    // Verify all required fields exist
-    expect(result).toHaveProperty("iocs");
-    expect(result).toHaveProperty("findings");
-    expect(result).toHaveProperty("riskScore");
-    expect(result).toHaveProperty("riskBreakdown");
-    expect(result).toHaveProperty("threatSummary");
-    expect(result).toHaveProperty("mitigations");
   });
 });

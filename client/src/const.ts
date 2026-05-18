@@ -1,5 +1,12 @@
 export { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 
+export const isLocalDevClient =
+  import.meta.env.VITE_LOCAL_DEV === "true" ||
+  import.meta.env.VITE_LOCAL_DEV === "1";
+
+export const getDevLoginUrl = (redirect = "/dashboard") =>
+  `/api/dev/login?redirect=${encodeURIComponent(redirect)}`;
+
 // Generate login URL at runtime so redirect URI reflects the current origin.
 export const getLoginUrl = () => {
   const oauthPortalUrl = import.meta.env.VITE_OAUTH_PORTAL_URL;

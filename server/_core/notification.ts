@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { ENV } from "./env";
+import { isLocalDev } from "./localDev";
 
 export type NotificationPayload = {
   title: string;
@@ -67,6 +68,11 @@ export async function notifyOwner(
   payload: NotificationPayload
 ): Promise<boolean> {
   const { title, content } = validatePayload(payload);
+
+  if (isLocalDev()) {
+    console.log(`[Notification] LOCAL_DEV alert: ${title}`);
+    return true;
+  }
 
   if (!ENV.forgeApiUrl) {
     throw new TRPCError({
