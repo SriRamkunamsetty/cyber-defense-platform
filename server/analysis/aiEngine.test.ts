@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { runAnalysisPipeline } from "./aiEngine";
+import { runForensicEngine } from "./forensic/forensicEngine";
 import type { ApkEvidence } from "../../shared/evidence";
 
 vi.mock("../db", () => ({
@@ -39,6 +40,11 @@ vi.mock("../_core/llm", () => ({
 
 const mockEvidence: ApkEvidence = {
   packageName: "com.test.malware",
+  hashes: {
+    md5: "b".repeat(32),
+    sha1: "c".repeat(40),
+    sha256: "a".repeat(64),
+  },
   sha256: "a".repeat(64),
   fileSize: 1024,
   permissions: [
@@ -77,13 +83,15 @@ const mockEvidence: ApkEvidence = {
   toolsUsed: ["adm-zip"],
 };
 
+const mockBundle = runForensicEngine(mockEvidence);
+
 describe("AI Analysis Engine", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("should run grounded analysis pipeline successfully", async () => {
-    const result = await runAnalysisPipeline(1, "test.apk", mockEvidence);
+    const result = await runAnalysisPipeline(1, "test.apk", mockBundle);
 
     expect(result).toBeDefined();
     expect(result.riskScore).toBeGreaterThanOrEqual(0);
@@ -91,7 +99,7 @@ describe("AI Analysis Engine", () => {
   });
 
   it("should have valid risk breakdown", async () => {
-    const result = await runAnalysisPipeline(1, "test.apk", mockEvidence);
+    const result = await runAnalysisPipeline(1, "test.apk", mockBundle);
 
     expect(result.riskBreakdown).toBeDefined();
     expect(result.riskBreakdown.dataExfiltration).toBeGreaterThanOrEqual(0);
@@ -99,14 +107,14 @@ describe("AI Analysis Engine", () => {
   });
 
   it("should return IOCs from evidence", async () => {
-    const result = await runAnalysisPipeline(1, "test.apk", mockEvidence);
+    const result = await runAnalysisPipeline(1, "test.apk", mockBundle);
 
     expect(result.iocs.length).toBeGreaterThan(0);
     expect(result.attackChain.length).toBeGreaterThan(0);
   });
 
   it("should generate mitigations", async () => {
-    const result = await runAnalysisPipeline(1, "test.apk", mockEvidence);
+    const result = await runAnalysisPipeline(1, "test.apk", mockBundle);
     expect(result.mitigations.length).toBeGreaterThan(0);
   });
 });

@@ -14,7 +14,19 @@ import { ExecutiveReportViewer } from "@/components/ExecutiveReportViewer";
 import { CriticalAlertModal } from "@/components/CriticalAlertModal";
 import { ApkFileExplorer } from "@/components/ApkFileExplorer";
 import { AttackChainFlow } from "@/components/AttackChainFlow";
-import { AlertTriangle, Brain, Shield, Zap, Network, Loader2 } from "lucide-react";
+import { ForensicIntelligencePanel } from "@/components/ForensicIntelligencePanel";
+import {
+  AlertTriangle,
+  Brain,
+  Shield,
+  Zap,
+  Network,
+  Loader2,
+  Dna,
+  Link2,
+  GitBranch,
+  Landmark,
+} from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useInvestigationWebSocket, type InvestigationEvent } from "@/hooks/useInvestigationWebSocket";
 import {
@@ -26,9 +38,14 @@ import {
 const AGENT_ICONS: Record<string, React.ReactNode> = {
   "Reverse Engineering": <Zap className="w-5 h-5" />,
   "Static Analysis": <Shield className="w-5 h-5" />,
+  "Behavioral Analysis": <Network className="w-5 h-5" />,
   "Dynamic Threat": <Network className="w-5 h-5" />,
+  "Malware DNA": <Dna className="w-5 h-5" />,
+  "IOC Correlation": <Link2 className="w-5 h-5" />,
   "Threat Intelligence": <Brain className="w-5 h-5" />,
+  "Attack Chain": <GitBranch className="w-5 h-5" />,
   "AI Reasoning": <Brain className="w-5 h-5" />,
+  "Fraud Intelligence": <Landmark className="w-5 h-5" />,
   "Risk Scoring": <AlertTriangle className="w-5 h-5" />,
   "Executive Report": <Shield className="w-5 h-5" />,
 };
@@ -315,7 +332,7 @@ export default function Investigation() {
           <p className="text-xs text-muted-foreground mb-2">Agents</p>
           <p className="text-3xl font-bold text-cyan-300">
             {agents.filter((a) => a.status === "completed").length}
-            <span className="text-lg text-muted-foreground">/7</span>
+            <span className="text-lg text-muted-foreground">/12</span>
           </p>
         </div>
         <div className="bg-white/5 border border-white/10 rounded-lg p-4">
@@ -331,8 +348,9 @@ export default function Investigation() {
       </motion.div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-6 bg-white/5 border border-white/10">
+        <TabsList className="grid w-full grid-cols-7 bg-white/5 border border-white/10">
           <TabsTrigger value="live">Live</TabsTrigger>
+          <TabsTrigger value="forensics">Forensics</TabsTrigger>
           <TabsTrigger value="explorer">Explorer</TabsTrigger>
           <TabsTrigger value="agents">Agents</TabsTrigger>
           <TabsTrigger value="threats">Threats</TabsTrigger>
@@ -351,6 +369,13 @@ export default function Investigation() {
             </div>
             <RiskScoreVisualization overallScore={riskScore} breakdown={breakdown} />
           </div>
+        </TabsContent>
+
+        <TabsContent value="forensics" className="space-y-4">
+          <ForensicIntelligencePanel
+            evidence={data?.evidence ?? null}
+            consensus={data?.consensus ?? null}
+          />
         </TabsContent>
 
         <TabsContent value="explorer" className="space-y-4">
@@ -384,7 +409,7 @@ export default function Investigation() {
         </TabsContent>
 
         <TabsContent value="agents">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
             {agents.map((agent, index) => (
               <PremiumAgentCard key={agent.name} agent={agent} index={index} />
             ))}
@@ -394,7 +419,11 @@ export default function Investigation() {
         <TabsContent value="threats" className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <ThreatIntelligencePanel iocs={iocs} isLoading={isAnalyzing} />
-            <PremiumThreatVisualization threats={threatNodes} />
+            <PremiumThreatVisualization
+              threats={threatNodes}
+              overallScore={riskScore}
+              riskBreakdown={data?.riskBreakdown ?? breakdown}
+            />
           </div>
         </TabsContent>
 

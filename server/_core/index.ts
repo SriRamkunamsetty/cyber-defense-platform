@@ -5,10 +5,13 @@ import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerDevAuthRoutes } from "./devAuth";
 import { registerLocalStorageRoutes } from "./localStorageRoutes";
+import { registerWorkerRoutes } from "./workerRoutes";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { ENV } from "./env";
 import { isLocalDev } from "./localDev";
+import { getStorageMode } from "../storage";
+import { useCloudTasks, useRedisPubSub } from "./gcpConfig";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -46,6 +49,7 @@ async function startServer() {
   registerLocalStorageRoutes(app);
   registerStorageProxy(app);
   registerDevAuthRoutes(app);
+  registerWorkerRoutes(app);
   registerOAuthRoutes(app);
   // tRPC API
   app.use(
@@ -81,6 +85,10 @@ async function startServer() {
     console.log(`  WebSocket: ws://localhost:${port}/api/ws`);
     console.log(`  Database: ${ENV.databaseUrl ? "configured" : "MISSING — set DATABASE_URL"}`);
     console.log(`  LLM: ${ENV.forgeApiKey ? "Forge/Gemini" : isLocalDev() ? "mock (grounded)" : "MISSING API KEY"}`);
+    console.log(`  Storage: ${getStorageMode()}`);
+    console.log(`  Queue: ${useCloudTasks() ? "Cloud Tasks" : "inline"}`);
+    console.log(`  Redis WS bridge: ${useRedisPubSub() ? "enabled" : "disabled (single-instance)"}`);
+    console.log(`  Region: ${ENV.deploymentRegion}`);
     console.log("═══════════════════════════════════════════════════");
     console.log("");
   });

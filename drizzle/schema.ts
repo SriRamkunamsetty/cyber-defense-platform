@@ -47,8 +47,9 @@ export const investigations = mysqlTable("investigations", {
   fileTreeJson: text("fileTreeJson"),
   attackChainJson: text("attackChainJson"),
   sha256Hash: varchar("sha256Hash", { length: 64 }),
+  consensusJson: text("consensusJson"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   completedAt: timestamp("completedAt"),
 });
 
@@ -104,3 +105,41 @@ export const chatMessages = mysqlTable("chatMessages", {
 
 export type ChatMessage = typeof chatMessages.$inferSelect;
 export type InsertChatMessage = typeof chatMessages.$inferInsert;
+
+export const investigationJobs = mysqlTable("investigationJobs", {
+  id: int("id").autoincrement().primaryKey(),
+  investigationId: int("investigationId").notNull().references(() => investigations.id),
+  status: mysqlEnum("status", ["queued", "running", "completed", "failed"]).default("queued").notNull(),
+  attempts: int("attempts").default(0).notNull(),
+  maxAttempts: int("maxAttempts").default(3).notNull(),
+  lastError: text("lastError"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  startedAt: timestamp("startedAt"),
+  completedAt: timestamp("completedAt"),
+});
+
+export type InvestigationJob = typeof investigationJobs.$inferSelect;
+
+export const investigationEvents = mysqlTable("investigationEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  investigationId: int("investigationId").notNull().references(() => investigations.id),
+  eventType: varchar("eventType", { length: 64 }).notNull(),
+  payload: text("payload"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type InvestigationEventRow = typeof investigationEvents.$inferSelect;
+
+export const auditLogs = mysqlTable("auditLogs", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").references(() => users.id),
+  action: varchar("action", { length: 128 }).notNull(),
+  resourceType: varchar("resourceType", { length: 64 }),
+  resourceId: varchar("resourceId", { length: 64 }),
+  metadata: text("metadata"),
+  ipAddress: varchar("ipAddress", { length: 45 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AuditLog = typeof auditLogs.$inferSelect;

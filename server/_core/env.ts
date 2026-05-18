@@ -10,4 +10,23 @@ export const ENV = {
   localDev:
     process.env.LOCAL_DEV === "true" || process.env.LOCAL_DEV === "1",
   port: parseInt(process.env.PORT || "3000", 10),
+
+  // Google Cloud (Track A/B)
+  gcsBucket: process.env.GCS_BUCKET ?? "",
+  gcpProjectId: process.env.GCP_PROJECT_ID ?? "",
+  gcpLocation: process.env.GCP_LOCATION ?? "asia-south1",
+  gcpTasksQueue: process.env.GCP_TASKS_QUEUE ?? "trinetra-investigations",
+  workerUrl: process.env.WORKER_URL ?? "",
+  workerSecret: process.env.WORKER_SECRET ?? "",
+  redisUrl: process.env.REDIS_URL ?? "",
+
+  // Vertex AI (optional — Track C)
+  vertexProjectId: process.env.VERTEX_PROJECT_ID ?? process.env.GCP_PROJECT_ID ?? "",
+  vertexLocation: process.env.VERTEX_LOCATION ?? "asia-south1",
+  useVertexAi: process.env.USE_VERTEX_AI === "true" || process.env.USE_VERTEX_AI === "1",
+
+  // Government / enterprise
+  deploymentRegion: process.env.DEPLOYMENT_REGION ?? "asia-south1",
+  orgName: process.env.ORG_NAME ?? "TRINETRA AI",
+  requireApiKey: process.env.REQUIRE_LLM_KEY === "true",
 };

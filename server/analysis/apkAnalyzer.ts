@@ -1,4 +1,6 @@
 import { createHash } from "crypto";
+import { extractCertificatesFromZip } from "./forensic/certificateExtractor";
+import { extractEmbeddedStrings } from "./forensic/stringExtractor";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";
@@ -235,12 +237,33 @@ export async function analyzeApkBuffer(
   try {
     await fs.writeFile(apkPath, apkBuffer);
     const sha256 = createHash("sha256").update(apkBuffer).digest("hex");
-    onProgress?.("APK upload validated", 5);
+    const md5 = createHash("md5").update(apkBuffer).digest("hex");
+    const sha1 = createHash("sha1").update(apkBuffer).digest("hex");
+    onProgress?.("APK upload validated — computing hashes", 5);
 
     const zip = new AdmZip(apkBuffer);
     const zipEntries = zip.getEntries().map((e) => e.entryName);
     const fileTree = buildFileTree(zipEntries);
+    const dexFileCount = zipEntries.filter((e) => e.endsWith(".dex")).length;
+    const nativeLibraries = zipEntries
+      .filter((e) => e.endsWith(".so"))
+      .map((e) => ({
+        name: path.basename(e),
+        path: e,
+        architecture: e.includes("arm64") ? "arm64" : e.includes("armeabi") ? "arm" : undefined,
+      }));
     onProgress?.("Unpacking APK structure", 10);
+
+    const readZipEntry = (name: string): Buffer | null => {
+      const entry = zip.getEntries().find((e) => e.entryName === name);
+      if (!entry) return null;
+      try {
+        return entry.getData();
+      } catch {
+        return null;
+      }
+    };
+    const certificates = extractCertificatesFromZip(zipEntries, readZipEntry);
 
     let packageName = "unknown";
     let permissions: string[] = [];
@@ -364,7 +387,25 @@ export async function analyzeApkBuffer(
       return true;
     });
 
-    onProgress?.("Permission intelligence analysis complete", 75);
+    onProgress?.("Extracting embedded strings and artifacts", 72);
+    const stringSources = [
+      manifestContent,
+      codeContent,
+      ...zip
+        .getEntries()
+        .slice(0, 100)
+        .map((e) => {
+          try {
+            return e.getData().toString("utf8", 0, Math.min(e.header.size, 50_000));
+          } catch {
+            return "";
+          }
+        }),
+    ].join("\n");
+    const embeddedStrings = extractEmbeddedStrings(stringSources, "apk_archive");
+    const hasObfuscation = uniqueIocs.some((i) => i.type === "obfuscation_pattern");
+
+    onProgress?.("Forensic artifact extraction complete", 75);
 
     return {
       packageName,
@@ -372,8 +413,14 @@ export async function analyzeApkBuffer(
       versionCode,
       minSdk,
       targetSdk,
+      hashes: { md5, sha1, sha256 },
       sha256,
       fileSize: apkBuffer.length,
+      dexFileCount,
+      hasObfuscation,
+      embeddedStrings,
+      nativeLibraries,
+      certificates,
       permissions: permissionEvidence,
       activities,
       services,
@@ -395,8 +442,10 @@ export function evidenceToContext(evidence: ApkEvidence): string {
   return JSON.stringify(
     {
       package: evidence.packageName,
+      hashes: evidence.hashes || { sha256: evidence.sha256 },
       sha256: evidence.sha256,
       fileSize: evidence.fileSize,
+      dexFileCount: evidence.dexFileCount,
       tools: evidence.toolsUsed,
       permissions: evidence.permissions,
       components: {
@@ -406,6 +455,14 @@ export function evidenceToContext(evidence: ApkEvidence): string {
       },
       suspiciousMethods: evidence.suspiciousMethods.slice(0, 25),
       iocs: evidence.iocs.slice(0, 40),
+      staticFindings: evidence.staticFindings?.slice(0, 15),
+      behavioralFindings: evidence.behavioralFindings?.slice(0, 10),
+      malwareDna: evidence.malwareDna,
+      infrastructureIntel: evidence.infrastructureIntel?.slice(0, 10),
+      embeddedStrings: evidence.embeddedStrings?.filter((s) => s.flagged).slice(0, 20),
+      nativeLibraries: evidence.nativeLibraries?.slice(0, 10),
+      certificates: evidence.certificates,
+      forensicConfidence: evidence.forensicConfidence,
       analysisNotes: evidence.analysisNotes,
     },
     null,

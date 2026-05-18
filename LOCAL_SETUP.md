@@ -2,7 +2,8 @@
 
 Run the full end-to-end malware investigation workflow on your machine.
 
-> **Full project guide (architecture, diagrams, glossary):** [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md)
+> **Full project guide (architecture, diagrams, glossary):** [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md)  
+> **Google Cloud / India gov deployment:** [docs/GCP_DEPLOYMENT.md](docs/GCP_DEPLOYMENT.md)
 
 ## Prerequisites
 

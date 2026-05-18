@@ -1,0 +1,12 @@
+node_modules
+dist
+.local-storage
+.env
+.env.*
+!.env.gcp.example
+.git
+.cursor
+*.md
+!docs/GCP_DEPLOYMENT.md
+coverage
+.vitest

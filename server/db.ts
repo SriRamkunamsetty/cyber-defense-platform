@@ -10,6 +10,7 @@ import {
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import type { ApkEvidence, AttackChainStep, RiskScoreResult } from "../shared/evidence";
+import type { ConsensusResult } from "../shared/forensics";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -115,7 +116,10 @@ export async function createInvestigation(
     })
     .$returningId();
 
-  const insertId = Number(result.id);
+  const raw = result as unknown as { id?: number } | Array<{ id: number }>;
+  const insertId = Array.isArray(raw)
+    ? Number(raw[0]?.id)
+    : Number(raw?.id);
   if (insertId) return insertId;
 
   const rows = await db
@@ -165,6 +169,7 @@ export async function updateInvestigationStatus(
     attackChain?: AttackChainStep[];
     riskBreakdown?: RiskScoreResult;
     sha256Hash?: string;
+    consensus?: ConsensusResult;
   }
 ) {
   const db = await getDb();
@@ -186,6 +191,9 @@ export async function updateInvestigationStatus(
   }
   if (options?.attackChain) {
     updates.attackChainJson = JSON.stringify(options.attackChain);
+  }
+  if (options?.consensus) {
+    updates.consensusJson = JSON.stringify(options.consensus);
   }
   if (options?.riskBreakdown) {
     updates.dataExfiltrationScore = options.riskBreakdown.dataExfiltration;
@@ -319,13 +327,20 @@ export async function getInvestigationChatHistory(investigationId: number) {
 }
 
 export function parseInvestigationEvidence(
-  investigation: { evidenceJson?: string | null; fileTreeJson?: string | null; attackChainJson?: string | null }
+  investigation: {
+    evidenceJson?: string | null;
+    fileTreeJson?: string | null;
+    attackChainJson?: string | null;
+    consensusJson?: string | null;
+  }
 ): {
   evidence: ApkEvidence | null;
   attackChain: AttackChainStep[];
+  consensus: ConsensusResult | null;
 } {
   let evidence: ApkEvidence | null = null;
   let attackChain: AttackChainStep[] = [];
+  let consensus: ConsensusResult | null = null;
 
   try {
     if (investigation.evidenceJson) {
@@ -343,5 +358,13 @@ export function parseInvestigationEvidence(
     attackChain = [];
   }
 
-  return { evidence, attackChain };
+  try {
+    if (investigation.consensusJson) {
+      consensus = JSON.parse(investigation.consensusJson) as ConsensusResult;
+    }
+  } catch {
+    consensus = null;
+  }
+
+  return { evidence, attackChain, consensus };
 }

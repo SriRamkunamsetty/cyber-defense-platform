@@ -1,9 +1,11 @@
-// Storage: Forge S3 presign (production) or local filesystem (LOCAL_DEV=true)
+// Storage: GCS (GCP) | Forge S3 presign (Manus) | local filesystem (LOCAL_DEV)
 
 import fs from "fs/promises";
 import path from "path";
 import { ENV } from "./_core/env";
 import { isLocalDev, LOCAL_STORAGE_DIR } from "./_core/localDev";
+import { useGcsStorage } from "./_core/gcpConfig";
+import { gcsGetBuffer, gcsPut } from "./storage/gcsStorage";
 
 function getForgeConfig() {
   const forgeUrl = ENV.forgeApiUrl;
@@ -11,7 +13,7 @@ function getForgeConfig() {
 
   if (!forgeUrl || !forgeKey) {
     throw new Error(
-      "Storage config missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY, or enable LOCAL_DEV=true"
+      "Storage config missing: set GCS_BUCKET (GCP), or BUILT_IN_FORGE_API_* (Manus), or LOCAL_DEV=true"
     );
   }
 
@@ -41,21 +43,11 @@ async function localStoragePut(
   return { key, url: `/api/local-files/${encodeURIComponent(key)}` };
 }
 
-export async function storagePut(
+async function forgeStoragePut(
   relKey: string,
-  data: Buffer | Uint8Array | string,
-  contentType = "application/octet-stream"
+  buffer: Buffer,
+  contentType: string
 ): Promise<{ key: string; url: string }> {
-  const buffer = Buffer.isBuffer(data)
-    ? data
-    : typeof data === "string"
-      ? Buffer.from(data)
-      : Buffer.from(data);
-
-  if (isLocalDev()) {
-    return localStoragePut(relKey, buffer, contentType);
-  }
-
   const { forgeUrl, forgeKey } = getForgeConfig();
   const key = appendHashSuffix(normalizeKey(relKey));
 
@@ -77,18 +69,43 @@ export async function storagePut(
   const uploadResp = await fetch(s3Url, {
     method: "PUT",
     headers: { "Content-Type": contentType },
-    body: buffer,
+    body: new Uint8Array(buffer),
   });
 
   if (!uploadResp.ok) {
-    throw new Error(`Storage upload to S3 failed (${uploadResp.status})`);
+    throw new Error(`Storage upload failed (${uploadResp.status})`);
   }
 
   return { key, url: `/manus-storage/${key}` };
 }
 
+export async function storagePut(
+  relKey: string,
+  data: Buffer | Uint8Array | string,
+  contentType = "application/vnd.android.package-archive"
+): Promise<{ key: string; url: string }> {
+  const buffer = Buffer.isBuffer(data)
+    ? data
+    : typeof data === "string"
+      ? Buffer.from(data)
+      : Buffer.from(data);
+
+  if (useGcsStorage()) {
+    return gcsPut(relKey, buffer, contentType);
+  }
+
+  if (isLocalDev()) {
+    return localStoragePut(relKey, buffer, contentType);
+  }
+
+  return forgeStoragePut(relKey, buffer, contentType);
+}
+
 export async function storageGet(relKey: string): Promise<{ key: string; url: string }> {
   const key = normalizeKey(relKey);
+  if (useGcsStorage()) {
+    return { key, url: `gs://${ENV.gcsBucket}/${key}` };
+  }
   if (isLocalDev()) {
     return { key, url: `/api/local-files/${encodeURIComponent(key)}` };
   }
@@ -100,6 +117,19 @@ export async function storageGetSignedUrl(relKey: string): Promise<string> {
 
   if (isLocalDev()) {
     return `http://127.0.0.1:${ENV.port}/api/local-files/${encodeURIComponent(key)}`;
+  }
+
+  if (useGcsStorage()) {
+    const { Storage } = await import("@google-cloud/storage");
+    const storage = new Storage({ projectId: ENV.gcpProjectId || undefined });
+    const [url] = await storage
+      .bucket(ENV.gcsBucket)
+      .file(key)
+      .getSignedUrl({
+        action: "read",
+        expires: Date.now() + 60 * 60 * 1000,
+      });
+    return url;
   }
 
   const { forgeUrl, forgeKey } = getForgeConfig();
@@ -119,9 +149,12 @@ export async function storageGetSignedUrl(relKey: string): Promise<string> {
   return url;
 }
 
-/** Read APK bytes directly (preferred for local pipeline). */
 export async function storageGetBuffer(relKey: string): Promise<Buffer> {
   const key = normalizeKey(relKey);
+
+  if (useGcsStorage()) {
+    return gcsGetBuffer(key);
+  }
 
   if (isLocalDev()) {
     const filePath = path.join(LOCAL_STORAGE_DIR, key);
@@ -134,4 +167,10 @@ export async function storageGetBuffer(relKey: string): Promise<Buffer> {
     throw new Error(`Failed to download file: ${response.status}`);
   }
   return Buffer.from(await response.arrayBuffer());
+}
+
+export function getStorageMode(): "gcs" | "local" | "forge" {
+  if (useGcsStorage()) return "gcs";
+  if (isLocalDev()) return "local";
+  return "forge";
 }

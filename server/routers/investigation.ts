@@ -10,6 +10,8 @@ import {
   createChatMessage,
   parseInvestigationEvidence,
 } from "../db";
+import { getInvestigationEvents } from "../_core/eventStore";
+import { writeAuditLog } from "../_core/audit";
 import { storagePut } from "../storage";
 import { runInvestigationAsync } from "../analysis/investigationService";
 import { askSocCopilot } from "../analysis/aiEngine";
@@ -19,10 +21,7 @@ export const investigationRouter = router({
     .input(
       z.object({
         fileName: z.string(),
-        fileData: z.union([
-          z.instanceof(Buffer),
-          z.instanceof(Uint8Array),
-        ]),
+        fileData: z.union([z.instanceof(Buffer), z.instanceof(Uint8Array)]),
         fileSize: z.number(),
       })
     )
@@ -56,11 +55,27 @@ export const investigationRouter = router({
         throw new Error("Failed to create investigation record");
       }
 
-      runInvestigationAsync({
+      await writeAuditLog({
+        userId: ctx.user.id,
+        action: "investigation.upload",
+        resourceType: "investigation",
+        resourceId: String(investigationId),
+        metadata: { fileName: input.fileName, fileSize: input.fileSize },
+      });
+
+      const job = await runInvestigationAsync({
         investigationId,
         apkFileName: input.fileName,
         apkFileKey: fileKey,
         userId: ctx.user.id,
+      });
+
+      await writeAuditLog({
+        userId: ctx.user.id,
+        action: "investigation.start",
+        resourceType: "investigation",
+        resourceId: String(investigationId),
+        metadata: { queueMode: job.mode },
       });
 
       return {
@@ -68,6 +83,7 @@ export const investigationRouter = router({
         investigationId,
         fileUrl: url,
         fileKey,
+        queueMode: job.mode,
       };
     }),
 
@@ -94,7 +110,8 @@ export const investigationRouter = router({
 
       const iocs = await getInvestigationIOCs(input.id);
       const agentLogs = await getInvestigationAgentLogs(input.id);
-      const { evidence, attackChain } = parseInvestigationEvidence(investigation);
+      const { evidence, attackChain, consensus } =
+        parseInvestigationEvidence(investigation);
 
       let mitigations: string[] = [];
       try {
@@ -105,14 +122,54 @@ export const investigationRouter = router({
         mitigations = [];
       }
 
+      await writeAuditLog({
+        userId: ctx.user.id,
+        action: "investigation.view",
+        resourceType: "investigation",
+        resourceId: String(input.id),
+      });
+
       return {
         investigation,
         iocs,
         agentLogs,
         evidence,
         attackChain,
+        consensus,
         mitigations,
+        riskBreakdown: {
+          dataExfiltration: investigation.dataExfiltrationScore ?? 0,
+          credentialHarvesting: investigation.credentialHarvestingScore ?? 0,
+          c2Communication: investigation.c2CommunicationScore ?? 0,
+          bankingTrojan: investigation.bankingTrojanScore ?? 0,
+        },
       };
+    }),
+
+  getEventHistory: protectedProcedure
+    .input(z.object({ investigationId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const investigation = await getInvestigationById(input.investigationId);
+      if (!investigation || investigation.userId !== ctx.user.id) {
+        throw new Error("Unauthorized");
+      }
+      const events = await getInvestigationEvents(input.investigationId);
+      return events.map((e) => {
+        let payload: unknown = null;
+        if (e.payload) {
+          try {
+            payload = JSON.parse(e.payload);
+          } catch {
+            payload = e.payload;
+          }
+        }
+        return {
+          id: e.id,
+          eventType: e.eventType,
+          payload,
+          createdAt: e.createdAt,
+        };
+      });
     }),
 
   getChatHistory: protectedProcedure
@@ -169,6 +226,14 @@ export const investigationRouter = router({
         "user",
         input.query
       );
+
+      await writeAuditLog({
+        userId: ctx.user.id,
+        action: "copilot.query",
+        resourceType: "investigation",
+        resourceId: String(input.investigationId),
+        metadata: { queryLength: input.query.length },
+      });
 
       const response = await askSocCopilot(
         input.investigationId,

@@ -1,9 +1,12 @@
 import { runAnalysisPipeline } from "./aiEngine";
 import { analyzeApkBuffer } from "./apkAnalyzer";
+import { runForensicEngine } from "./forensic/forensicEngine";
 import { broadcastInvestigationEvent } from "../websocket";
 import { notifyOwner } from "../_core/notification";
 import { storageGetBuffer } from "../storage";
 import { updateInvestigationStatus } from "../db";
+import { isValidApkBuffer } from "./investigationQueue";
+import { enqueueInvestigation } from "./jobQueue";
 
 export interface InvestigationRequest {
   investigationId: number;
@@ -17,7 +20,8 @@ async function downloadApk(fileKey: string): Promise<Buffer> {
 }
 
 /**
- * Runs the complete investigation pipeline: download APK → forensic analysis → grounded AI agents.
+ * Runs the complete investigation pipeline:
+ * download APK → forensic extraction → validation/enrichment → autonomous AI agents → consensus
  */
 export async function runInvestigation(
   request: InvestigationRequest
@@ -28,7 +32,7 @@ export async function runInvestigation(
     broadcastInvestigationEvent({
       type: "agent_start",
       investigationId,
-      message: "Investigation pipeline starting",
+      message: "Autonomous cyber forensics pipeline starting",
       timestamp: new Date().toISOString(),
     });
 
@@ -46,20 +50,30 @@ export async function runInvestigation(
 
     onLog("Downloading APK from secure storage", 2);
     const apkBuffer = await downloadApk(apkFileKey);
-    onLog("APK retrieved — beginning reverse engineering", 5);
 
-    const evidence = await analyzeApkBuffer(apkBuffer, apkFileName, onLog);
+    if (!isValidApkBuffer(apkBuffer)) {
+      throw new Error("Invalid APK file — not a valid ZIP/APK archive");
+    }
+
+    onLog("APK retrieved — beginning forensic reverse engineering", 5);
+
+    const rawEvidence = await analyzeApkBuffer(apkBuffer, apkFileName, onLog);
+    onLog("Running enterprise forensic validation engine", 78);
+
+    const forensicBundle = runForensicEngine(rawEvidence);
+    const evidence = forensicBundle.evidence;
 
     await updateInvestigationStatus(investigationId, "analyzing", {
       packageName: evidence.packageName,
       evidence,
       sha256Hash: evidence.sha256,
+      attackChain: forensicBundle.attackChain,
     });
 
     const result = await runAnalysisPipeline(
       investigationId,
       apkFileName,
-      evidence,
+      forensicBundle,
       onLog
     );
 
@@ -72,7 +86,7 @@ export async function runInvestigation(
 
       await notifyOwner({
         title: `Critical Risk Alert: ${apkFileName}`,
-        content: `Risk Score: ${result.riskScore}/100\nPackage: ${evidence.packageName}\n\nTop Threats:\n${topThreats || "Multiple critical indicators"}\n\nImmediate review recommended.`,
+        content: `Risk Score: ${result.riskScore}/100\nClassification: ${result.consensus?.threatClassification || "High risk"}\nPackage: ${evidence.packageName}\nForensic Confidence: ${forensicBundle.forensicConfidence}%\n\nTop Threats:\n${topThreats || "Multiple critical indicators"}\n\nImmediate review recommended.`,
       });
     }
   } catch (error) {
@@ -89,11 +103,8 @@ export async function runInvestigation(
   }
 }
 
-export function runInvestigationAsync(
+export async function runInvestigationAsync(
   request: InvestigationRequest
-): Promise<void> {
-  runInvestigation(request).catch((error) => {
-    console.error("Async investigation failed:", error);
-  });
-  return Promise.resolve();
+): Promise<{ mode: "cloud_tasks" | "inline"; jobId: number | null }> {
+  return enqueueInvestigation(request);
 }

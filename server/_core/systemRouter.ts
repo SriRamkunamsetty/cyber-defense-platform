@@ -5,6 +5,8 @@ import { notifyOwner } from "./notification";
 import { adminProcedure, publicProcedure, router } from "./trpc";
 import { ENV } from "./env";
 import { isLocalDev } from "./localDev";
+import { useCloudTasks, useGcsStorage, useRedisPubSub } from "./gcpConfig";
+import { getStorageMode } from "../storage";
 import { sql } from "drizzle-orm";
 import { getDb } from "../db";
 
@@ -39,7 +41,11 @@ export const systemRouter = router({
       localDev: isLocalDev(),
       database: dbOk ? "connected" : "unavailable",
       llm: ENV.forgeApiKey ? "forge" : isLocalDev() ? "mock" : "missing",
-      storage: isLocalDev() ? "local-filesystem" : "forge-s3",
+      storage: getStorageMode(),
+      gcs: useGcsStorage(),
+      cloudTasks: useCloudTasks(),
+      redisPubSub: useRedisPubSub(),
+      deploymentRegion: ENV.deploymentRegion,
       tools: {
         apktool: await toolOnPath("apktool"),
         jadx: await toolOnPath("jadx"),

@@ -220,6 +220,11 @@ const assertApiKey = () => {
     if (isLocalDev()) {
       return;
     }
+    if (ENV.isProduction || ENV.requireApiKey) {
+      throw new Error(
+        "BUILT_IN_FORGE_API_KEY is required in production. Configure Forge/Gemini or Vertex AI — mock AI is disabled for government deployments."
+      );
+    }
     throw new Error(
       "BUILT_IN_FORGE_API_KEY is not configured. Set it in .env or use LOCAL_DEV=true for mock AI."
     );
