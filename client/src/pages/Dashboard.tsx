@@ -52,19 +52,53 @@ export default function Dashboard() {
     if (file) setSelectedFile(file);
   };
 
+  const getUploadUrlMutation = trpc.investigation.getPresignedUploadUrl.useMutation();
+
   const handleAnalyze = async () => {
     if (!selectedFile) return;
 
     setUploadProgress(10);
     try {
-      const buffer = await selectedFile.arrayBuffer();
-      setUploadProgress(40);
-      await uploadMutation.mutateAsync({
+      const { uploadUrl, fileKey } = await getUploadUrlMutation.mutateAsync({
         fileName: selectedFile.name,
-        fileData: new Uint8Array(buffer),
         fileSize: selectedFile.size,
       });
-    } catch {
+      setUploadProgress(30);
+
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", uploadUrl);
+        xhr.setRequestHeader("Content-Type", "application/vnd.android.package-archive");
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const percentComplete = Math.round((e.loaded / e.total) * 100);
+            setUploadProgress(30 + Math.round(percentComplete * 0.5));
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+          } else {
+            reject(new Error(`Upload failed with status ${xhr.status}`));
+          }
+        };
+
+        xhr.onerror = () => reject(new Error("Network error during upload"));
+        xhr.send(selectedFile);
+      });
+
+      setUploadProgress(85);
+
+      await uploadMutation.mutateAsync({
+        fileName: selectedFile.name,
+        fileKey,
+        fileSize: selectedFile.size,
+      });
+    } catch (err: any) {
+      console.error("Upload error:", err);
+      toast.error(err?.message || "Upload process failed");
       setUploadProgress(0);
     }
   };

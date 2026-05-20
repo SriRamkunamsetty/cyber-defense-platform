@@ -79,6 +79,56 @@ async function forgeStoragePut(
   return { key, url: `/manus-storage/${key}` };
 }
 
+export async function storageGetPresignedUploadUrl(
+  relKey: string,
+  contentType = "application/vnd.android.package-archive"
+): Promise<{ uploadUrl: string; key: string }> {
+  const key = appendHashSuffix(normalizeKey(relKey));
+
+  if (isLocalDev()) {
+    return {
+      uploadUrl: `http://127.0.0.1:${ENV.port}/api/local-upload/${encodeURIComponent(key)}`,
+      key,
+    };
+  }
+
+  if (useGcsStorage()) {
+    const bucketName = ENV.gcsBucket;
+    if (!bucketName) throw new Error("GCS_BUCKET not configured");
+    const { Storage } = await import("@google-cloud/storage");
+    const storageInstance = new Storage({ projectId: ENV.gcpProjectId || undefined });
+    const [url] = await storageInstance
+      .bucket(bucketName)
+      .file(key)
+      .getSignedUrl({
+        version: "v4",
+        action: "write",
+        expires: Date.now() + 15 * 60 * 1000,
+        contentType,
+      });
+    return { uploadUrl: url, key };
+  }
+
+  // Forge fallback
+  const { forgeUrl, forgeKey } = getForgeConfig();
+  const presignUrl = new URL("v1/storage/presign/put", forgeUrl + "/");
+  presignUrl.searchParams.set("path", key);
+
+  const presignResp = await fetch(presignUrl, {
+    headers: { Authorization: `Bearer ${forgeKey}` },
+  });
+
+  if (!presignResp.ok) {
+    const msg = await presignResp.text().catch(() => presignResp.statusText);
+    throw new Error(`Storage presign failed (${presignResp.status}): ${msg}`);
+  }
+
+  const { url: s3Url } = (await presignResp.json()) as { url: string };
+  if (!s3Url) throw new Error("Forge returned empty presign URL");
+
+  return { uploadUrl: s3Url, key };
+}
+
 export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,

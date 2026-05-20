@@ -13,23 +13,61 @@ import {
 } from "../db";
 import { getInvestigationEvents } from "../_core/eventStore";
 import { writeAuditLog } from "../_core/audit";
-import { storagePut } from "../storage";
+import { storagePut, storageGetBuffer, storageGetPresignedUploadUrl } from "../storage";
 import { runInvestigationAsync } from "../analysis/investigationService";
 import { askSocCopilot } from "../analysis/aiEngine";
 
 export const investigationRouter = router({
-  createFromUpload: protectedProcedure
+  getPresignedUploadUrl: protectedProcedure
     .input(
       z.object({
         fileName: z.string(),
-        fileData: z.union([z.instanceof(Buffer), z.instanceof(Uint8Array)]),
         fileSize: z.number(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const fileBuffer = Buffer.isBuffer(input.fileData)
-        ? input.fileData
-        : Buffer.from(input.fileData);
+      if (!input.fileName.toLowerCase().endsWith(".apk")) {
+        throw new Error("Only APK files are supported");
+      }
+      if (input.fileSize > 150 * 1024 * 1024) {
+        throw new Error("APK file exceeds 150MB limit");
+      }
+      const fileKey = `apk-files/${ctx.user.id}/${Date.now()}-${input.fileName}`;
+      const { uploadUrl, key } = await storageGetPresignedUploadUrl(
+        fileKey,
+        "application/vnd.android.package-archive"
+      );
+      return { uploadUrl, fileKey: key };
+    }),
+
+  createFromUpload: protectedProcedure
+    .input(
+      z.object({
+        fileName: z.string(),
+        fileData: z.union([z.instanceof(Buffer), z.instanceof(Uint8Array)]).optional(),
+        fileKey: z.string().optional(),
+        fileSize: z.number(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      let fileBuffer: Buffer;
+      let fileKey = input.fileKey;
+
+      if (fileKey) {
+        fileBuffer = await storageGetBuffer(fileKey);
+      } else if (input.fileData) {
+        fileBuffer = Buffer.isBuffer(input.fileData)
+          ? input.fileData
+          : Buffer.from(input.fileData);
+        fileKey = `apk-files/${ctx.user.id}/${Date.now()}-${input.fileName}`;
+        await storagePut(
+          fileKey,
+          fileBuffer,
+          "application/vnd.android.package-archive"
+        );
+      } else {
+        throw new Error("Missing fileData or fileKey");
+      }
 
       // Verify ZIP magic bytes (PK header: 0x50, 0x4B, 0x03, 0x04)
       if (
@@ -45,21 +83,14 @@ export const investigationRouter = router({
       if (!input.fileName.toLowerCase().endsWith(".apk")) {
         throw new Error("Only APK files are supported");
       }
-      if (input.fileSize > 50 * 1024 * 1024) {
-        throw new Error("APK file exceeds 50MB limit");
+      if (input.fileSize > 150 * 1024 * 1024) {
+        throw new Error("APK file exceeds 150MB limit");
       }
-
-      const fileKey = `apk-files/${ctx.user.id}/${Date.now()}-${input.fileName}`;
-      const { url } = await storagePut(
-        fileKey,
-        fileBuffer,
-        "application/vnd.android.package-archive"
-      );
 
       const investigationId = await createInvestigation(
         ctx.user.id,
         input.fileName,
-        fileKey,
+        fileKey!,
         input.fileSize
       );
 
@@ -78,7 +109,7 @@ export const investigationRouter = router({
       const job = await runInvestigationAsync({
         investigationId,
         apkFileName: input.fileName,
-        apkFileKey: fileKey,
+        apkFileKey: fileKey!,
         userId: ctx.user.id,
       });
 
@@ -93,9 +124,6 @@ export const investigationRouter = router({
       return {
         success: true,
         investigationId,
-        fileUrl: url,
-        fileKey,
-        queueMode: job.mode,
       };
     }),
 
