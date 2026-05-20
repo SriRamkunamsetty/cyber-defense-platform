@@ -48,6 +48,10 @@ function validateRealtimeTopology(): void {
   }
 }
 
+import { registerSecurityHeaders } from "./securityHeaders";
+import { registerCors } from "./cors";
+import { apiRateLimit } from "./rateLimiter";
+
 async function startServer() {
   const app = express();
   const server = createServer(app);
@@ -58,8 +62,17 @@ async function startServer() {
     initializeWebSocket(server);
   }
 
+  // Register security headers and CORS
+  registerSecurityHeaders(app);
+  registerCors(app);
+
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  
+  // Apply API rate limit to tRPC and internal API routes
+  app.use("/api/trpc", apiRateLimit);
+  app.use("/api/internal", apiRateLimit);
+
   registerLocalStorageRoutes(app);
   registerStorageProxy(app);
   registerDevAuthRoutes(app);

@@ -27,16 +27,27 @@ export const investigationRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      const fileBuffer = Buffer.isBuffer(input.fileData)
+        ? input.fileData
+        : Buffer.from(input.fileData);
+
+      // Verify ZIP magic bytes (PK header: 0x50, 0x4B, 0x03, 0x04)
+      if (
+        fileBuffer.length < 4 ||
+        fileBuffer[0] !== 0x50 ||
+        fileBuffer[1] !== 0x4b ||
+        fileBuffer[2] !== 0x03 ||
+        fileBuffer[3] !== 0x04
+      ) {
+        throw new Error("Invalid APK file: not a valid ZIP/APK archive");
+      }
+
       if (!input.fileName.toLowerCase().endsWith(".apk")) {
         throw new Error("Only APK files are supported");
       }
       if (input.fileSize > 50 * 1024 * 1024) {
         throw new Error("APK file exceeds 50MB limit");
       }
-
-      const fileBuffer = Buffer.isBuffer(input.fileData)
-        ? input.fileData
-        : Buffer.from(input.fileData);
 
       const fileKey = `apk-files/${ctx.user.id}/${Date.now()}-${input.fileName}`;
       const { url } = await storagePut(
