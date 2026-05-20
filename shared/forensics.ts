@@ -143,6 +143,52 @@ export interface ForensicReport {
   memory: InvestigationMemory;
 }
 
+export interface EvidenceLineageEntity {
+  id: number;
+  entityKey: string;
+  entityType:
+    | "package"
+    | "permission"
+    | "ioc"
+    | "method"
+    | "component"
+    | "certificate"
+    | "embedded_string"
+    | "native_library"
+    | "static_finding"
+    | "behavioral_finding"
+    | "attack_stage"
+    | "malware_family";
+  displayName: string;
+  severity: "low" | "medium" | "high" | "critical";
+  confidence: number;
+  sourceType?: string | null;
+  sourceRef?: string | null;
+  lineage?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface EvidenceLineageEdge {
+  id: number;
+  fromEntityId: number;
+  toEntityId: number;
+  relationshipType:
+    | "declares"
+    | "contains"
+    | "supports"
+    | "derives_to"
+    | "indicates"
+    | "classified_as"
+    | "references";
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface InvestigationEvidenceLineage {
+  investigationId: number;
+  entities: EvidenceLineageEntity[];
+  edges: EvidenceLineageEdge[];
+}
+
 /** Re-export for convenience */
 export type {
   ApkEvidence,

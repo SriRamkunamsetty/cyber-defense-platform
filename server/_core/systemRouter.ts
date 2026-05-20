@@ -45,7 +45,16 @@ export const systemRouter = router({
       gcs: useGcsStorage(),
       cloudTasks: useCloudTasks(),
       redisPubSub: useRedisPubSub(),
+      websocketEnabled:
+        ENV.workerRole !== "forensics" && ENV.workerRole !== "ai",
+      redisRequiredInProduction:
+        ENV.isProduction &&
+        ENV.workerRole !== "forensics" &&
+        ENV.workerRole !== "ai",
       deploymentRegion: ENV.deploymentRegion,
+      workerRole: ENV.workerRole,
+      forensicsWorkerConfigured: Boolean(ENV.forensicsWorkerUrl || ENV.workerUrl),
+      aiWorkerConfigured: Boolean(ENV.aiWorkerUrl),
       tools: {
         apktool: await toolOnPath("apktool"),
         jadx: await toolOnPath("jadx"),

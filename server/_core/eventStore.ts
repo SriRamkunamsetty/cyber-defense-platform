@@ -5,15 +5,16 @@ import { getDb } from "../db";
 
 export async function persistInvestigationEvent(
   event: InvestigationEvent
-): Promise<void> {
+): Promise<number | null> {
   const db = await getDb();
-  if (!db) return;
+  if (!db) return null;
 
   try {
-    await db.insert(investigationEvents).values({
+    const result = await db.insert(investigationEvents).values({
       investigationId: event.investigationId,
       eventType: event.type,
       payload: JSON.stringify({
+        sequence: event.sequence,
         agentName: event.agentName,
         progress: event.progress,
         message: event.message,
@@ -21,8 +22,11 @@ export async function persistInvestigationEvent(
         timestamp: event.timestamp,
       }),
     });
+    const row = result as unknown as { insertId?: number };
+    return row.insertId ? Number(row.insertId) : null;
   } catch (error) {
     console.warn("[EventStore] Persist failed:", error);
+    return null;
   }
 }
 

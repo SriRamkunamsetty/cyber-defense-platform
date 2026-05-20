@@ -8,6 +8,7 @@ import {
   getInvestigationAgentLogs,
   getInvestigationChatHistory,
   createChatMessage,
+  getInvestigationEvidenceLineage,
   parseInvestigationEvidence,
 } from "../db";
 import { getInvestigationEvents } from "../_core/eventStore";
@@ -165,11 +166,23 @@ export const investigationRouter = router({
         }
         return {
           id: e.id,
+          sequence: e.id,
           eventType: e.eventType,
           payload,
           createdAt: e.createdAt,
         };
       });
+    }),
+
+  getEvidenceLineage: protectedProcedure
+    .input(z.object({ investigationId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const investigation = await getInvestigationById(input.investigationId);
+      if (!investigation || investigation.userId !== ctx.user.id) {
+        throw new Error("Unauthorized");
+      }
+
+      return getInvestigationEvidenceLineage(input.investigationId);
     }),
 
   getChatHistory: protectedProcedure

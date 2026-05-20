@@ -1,16 +1,35 @@
 import { eq, and, desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
+  evidenceEdges,
+  evidenceEntities,
   InsertUser,
   users,
   investigations,
   iocs,
   agentLogs,
   chatMessages,
+  investigationCheckpoints,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import type { ApkEvidence, AttackChainStep, RiskScoreResult } from "../shared/evidence";
-import type { ConsensusResult } from "../shared/forensics";
+import type {
+  ConsensusResult,
+  EvidenceLineageEdge,
+  EvidenceLineageEntity,
+  InvestigationEvidenceLineage,
+  ValidatedForensicBundle,
+} from "../shared/forensics";
+import {
+  assertLifecycleTransition,
+  mapLifecycleStateToPublicStatus,
+  normalizeLifecycleState,
+  type InvestigationLifecycleState,
+} from "./analysis/investigationStateMachine";
+import {
+  buildInvestigationEvidenceLineage,
+  rehydrateInvestigationEvidenceLineage,
+} from "./analysis/evidenceLineage";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -113,6 +132,7 @@ export async function createInvestigation(
       fileKey,
       fileSize,
       status: "pending",
+      lifecycleState: "created",
     })
     .$returningId();
 
@@ -159,6 +179,8 @@ export async function updateInvestigationStatus(
   id: number,
   status: string,
   options?: {
+    lifecycleState?: InvestigationLifecycleState;
+    currentCheckpoint?: string | null;
     riskScore?: number;
     riskLevel?: string;
     threatSummary?: string;
@@ -176,6 +198,12 @@ export async function updateInvestigationStatus(
   if (!db) return;
 
   const updates: Record<string, unknown> = { status };
+  if (options?.lifecycleState !== undefined) {
+    updates.lifecycleState = options.lifecycleState;
+  }
+  if (options?.currentCheckpoint !== undefined) {
+    updates.currentCheckpoint = options.currentCheckpoint;
+  }
   if (options?.riskScore !== undefined) updates.riskScore = options.riskScore;
   if (options?.riskLevel !== undefined) updates.riskLevel = options.riskLevel;
   if (options?.threatSummary !== undefined)
@@ -207,6 +235,41 @@ export async function updateInvestigationStatus(
   }
 
   await db.update(investigations).set(updates).where(eq(investigations.id, id));
+}
+
+export async function transitionInvestigationLifecycle(
+  id: number,
+  nextState: InvestigationLifecycleState,
+  options?: {
+    currentCheckpoint?: string | null;
+    riskScore?: number;
+    riskLevel?: string;
+    threatSummary?: string;
+    aiReasoning?: string;
+    mitigations?: string[];
+    packageName?: string;
+    evidence?: ApkEvidence;
+    attackChain?: AttackChainStep[];
+    riskBreakdown?: RiskScoreResult;
+    sha256Hash?: string;
+    consensus?: ConsensusResult;
+  }
+): Promise<void> {
+  const investigation = await getInvestigationById(id);
+  if (!investigation) {
+    throw new Error(`Investigation ${id} not found`);
+  }
+
+  const currentState = normalizeLifecycleState(
+    (investigation as { lifecycleState?: string | null }).lifecycleState,
+    investigation.status
+  );
+  assertLifecycleTransition(currentState, nextState);
+
+  await updateInvestigationStatus(id, mapLifecycleStateToPublicStatus(nextState), {
+    ...options,
+    lifecycleState: nextState,
+  });
 }
 
 export async function createIOC(
@@ -296,6 +359,187 @@ export async function getInvestigationAgentLogs(investigationId: number) {
     .select()
     .from(agentLogs)
     .where(eq(agentLogs.investigationId, investigationId));
+}
+
+export async function upsertInvestigationCheckpoint(
+  investigationId: number,
+  checkpointKey: string,
+  payload?: unknown
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  await db
+    .insert(investigationCheckpoints)
+    .values({
+      investigationId,
+      checkpointKey,
+      status: "active",
+      payload: payload === undefined ? null : JSON.stringify(payload),
+    })
+    .onDuplicateKeyUpdate({
+      set: {
+        status: "active",
+        payload: payload === undefined ? null : JSON.stringify(payload),
+        updatedAt: new Date(),
+      },
+    });
+
+  await db
+    .update(investigations)
+    .set({ currentCheckpoint: checkpointKey })
+    .where(eq(investigations.id, investigationId));
+}
+
+export async function getInvestigationCheckpoint<T>(
+  investigationId: number,
+  checkpointKey: string
+): Promise<T | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  const rows = await db
+    .select()
+    .from(investigationCheckpoints)
+    .where(
+      and(
+        eq(investigationCheckpoints.investigationId, investigationId),
+        eq(investigationCheckpoints.checkpointKey, checkpointKey)
+      )
+    )
+    .limit(1);
+
+  const row = rows[0];
+  if (!row?.payload) return null;
+
+  try {
+    return JSON.parse(row.payload) as T;
+  } catch {
+    return null;
+  }
+}
+
+function parseJsonObject(
+  value: string | null | undefined
+): Record<string, unknown> | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+export async function syncInvestigationEvidenceLineage(
+  investigationId: number,
+  bundle: ValidatedForensicBundle
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  const graph = buildInvestigationEvidenceLineage(investigationId, bundle);
+
+  await db.delete(evidenceEdges).where(eq(evidenceEdges.investigationId, investigationId));
+  await db
+    .delete(evidenceEntities)
+    .where(eq(evidenceEntities.investigationId, investigationId));
+
+  if (graph.entities.length === 0) return;
+
+  await db.insert(evidenceEntities).values(
+    graph.entities.map((entity) => ({
+      investigationId,
+      entityKey: entity.entityKey,
+      entityType: entity.entityType,
+      displayName: entity.displayName,
+      severity: entity.severity,
+      confidence: entity.confidence,
+      sourceType: entity.sourceType ?? null,
+      sourceRef: entity.sourceRef ?? null,
+      lineageJson: entity.lineage ? JSON.stringify(entity.lineage) : null,
+      metadataJson: entity.metadata ? JSON.stringify(entity.metadata) : null,
+    }))
+  );
+
+  const insertedEntities = await db
+    .select()
+    .from(evidenceEntities)
+    .where(eq(evidenceEntities.investigationId, investigationId));
+  const entityIdByKey = new Map(
+    insertedEntities.map((entity) => [entity.entityKey, entity.id] as const)
+  );
+
+  if (graph.edges.length === 0) return;
+
+  await db.insert(evidenceEdges).values(
+    graph.edges
+      .map((edge) => {
+        const fromEntityId = entityIdByKey.get(edge.fromEntityKey);
+        const toEntityId = entityIdByKey.get(edge.toEntityKey);
+        if (!fromEntityId || !toEntityId) return null;
+
+        return {
+          investigationId,
+          edgeKey: `${edge.relationshipType}:${edge.fromEntityKey}->${edge.toEntityKey}`.slice(
+            0,
+            255
+          ),
+          fromEntityId,
+          toEntityId,
+          relationshipType: edge.relationshipType,
+          metadataJson: edge.metadata ? JSON.stringify(edge.metadata) : null,
+        };
+      })
+      .filter((edge): edge is NonNullable<typeof edge> => edge !== null)
+  );
+}
+
+export async function getInvestigationEvidenceLineage(
+  investigationId: number
+): Promise<InvestigationEvidenceLineage> {
+  const db = await getDb();
+  if (!db) {
+    return {
+      investigationId,
+      entities: [],
+      edges: [],
+    };
+  }
+
+  const [entityRows, edgeRows] = await Promise.all([
+    db
+      .select()
+      .from(evidenceEntities)
+      .where(eq(evidenceEntities.investigationId, investigationId)),
+    db
+      .select()
+      .from(evidenceEdges)
+      .where(eq(evidenceEdges.investigationId, investigationId)),
+  ]);
+
+  const entities: EvidenceLineageEntity[] = entityRows.map((entity) => ({
+    id: entity.id,
+    entityKey: entity.entityKey,
+    entityType: entity.entityType as EvidenceLineageEntity["entityType"],
+    displayName: entity.displayName,
+    severity: entity.severity as EvidenceLineageEntity["severity"],
+    confidence: entity.confidence,
+    sourceType: entity.sourceType ?? null,
+    sourceRef: entity.sourceRef ?? null,
+    lineage: parseJsonObject(entity.lineageJson),
+    metadata: parseJsonObject(entity.metadataJson),
+  }));
+
+  const edges: EvidenceLineageEdge[] = edgeRows.map((edge) => ({
+    id: edge.id,
+    fromEntityId: edge.fromEntityId,
+    toEntityId: edge.toEntityId,
+    relationshipType:
+      edge.relationshipType as EvidenceLineageEdge["relationshipType"],
+    metadata: parseJsonObject(edge.metadataJson),
+  }));
+
+  return rehydrateInvestigationEvidenceLineage(investigationId, entities, edges);
 }
 
 export async function createChatMessage(

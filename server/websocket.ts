@@ -12,8 +12,11 @@ export interface InvestigationEvent {
     | "agent_complete"
     | "agent_error"
     | "investigation_complete"
-    | "investigation_error";
+    | "investigation_error"
+    | "lifecycle_transition"
+    | "checkpoint_saved";
   investigationId: number;
+  sequence?: number;
   agentName?: string;
   progress?: number;
   message?: string;
@@ -73,7 +76,7 @@ class InvestigationWebSocketManager {
   }
 
   private removeConnection(ws: WebSocket): void {
-    for (const clients of this.connections.values()) {
+    for (const clients of Array.from(this.connections.values())) {
       clients.delete(ws);
     }
   }
@@ -83,7 +86,7 @@ class InvestigationWebSocketManager {
     if (!clients?.size) return;
 
     const message = JSON.stringify(event);
-    for (const client of clients) {
+    for (const client of Array.from(clients)) {
       if (client.readyState === WebSocket.OPEN) {
         client.send(message);
       }
@@ -108,9 +111,10 @@ export function initializeWebSocket(server: HTTPServer): void {
 export async function broadcastInvestigationEvent(
   event: InvestigationEvent
 ): Promise<void> {
-  await persistInvestigationEvent(event);
-  wsManager?.broadcastEvent(event);
-  await publishInvestigationEvent(event);
+  const sequence = await persistInvestigationEvent(event);
+  const enrichedEvent = sequence ? { ...event, sequence } : event;
+  wsManager?.broadcastEvent(enrichedEvent);
+  await publishInvestigationEvent(enrichedEvent);
 }
 
 export function getWebSocketManager(): InvestigationWebSocketManager | null {

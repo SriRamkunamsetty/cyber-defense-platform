@@ -3,22 +3,22 @@ import express from "express";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
+import { appRouter } from "../routers";
+import { getStorageMode } from "../storage";
+import { initializeWebSocket } from "../websocket";
+import { createContext } from "./context";
 import { registerDevAuthRoutes } from "./devAuth";
+import { ENV } from "./env";
+import { useCloudTasks, useRedisPubSub } from "./gcpConfig";
+import { isLocalDev } from "./localDev";
 import { registerLocalStorageRoutes } from "./localStorageRoutes";
-import { registerWorkerRoutes } from "./workerRoutes";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
-import { ENV } from "./env";
-import { isLocalDev } from "./localDev";
-import { getStorageMode } from "../storage";
-import { useCloudTasks, useRedisPubSub } from "./gcpConfig";
-import { appRouter } from "../routers";
-import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
-import { initializeWebSocket, type HTTPServer } from "../websocket";
+import { registerWorkerRoutes } from "./workerRoutes";
 
 function isPortAvailable(port: number): Promise<boolean> {
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     const server = net.createServer();
     server.listen(port, () => {
       server.close(() => resolve(true));
@@ -27,7 +27,7 @@ function isPortAvailable(port: number): Promise<boolean> {
   });
 }
 
-async function findAvailablePort(startPort: number = 3000): Promise<number> {
+async function findAvailablePort(startPort = 3000): Promise<number> {
   for (let port = startPort; port < startPort + 20; port++) {
     if (await isPortAvailable(port)) {
       return port;
@@ -36,14 +36,28 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
   throw new Error(`No available port found starting from ${startPort}`);
 }
 
+function isWebSocketRoleEnabled(): boolean {
+  return ENV.workerRole !== "forensics" && ENV.workerRole !== "ai";
+}
+
+function validateRealtimeTopology(): void {
+  if (ENV.isProduction && isWebSocketRoleEnabled() && !useRedisPubSub()) {
+    console.warn(
+      "[Topology] WARNING: REDIS_URL not set in production. WebSocket sync limited to single instance. Set --max-instances=1 on Cloud Run or configure Memorystore Redis."
+    );
+  }
+}
+
 async function startServer() {
   const app = express();
   const server = createServer(app);
-  
-  // Initialize WebSocket server for real-time investigation updates
-  initializeWebSocket(server);
-  
-  // Configure body parser with larger size limit for file uploads
+
+  validateRealtimeTopology();
+
+  if (isWebSocketRoleEnabled()) {
+    initializeWebSocket(server);
+  }
+
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerLocalStorageRoutes(app);
@@ -51,7 +65,7 @@ async function startServer() {
   registerDevAuthRoutes(app);
   registerWorkerRoutes(app);
   registerOAuthRoutes(app);
-  // tRPC API
+
   app.use(
     "/api/trpc",
     createExpressMiddleware({
@@ -59,14 +73,14 @@ async function startServer() {
       createContext,
     })
   );
-  // development mode uses Vite, production mode uses static files
+
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
   } else {
     serveStatic(app);
   }
 
-  const preferredPort = parseInt(process.env.PORT || "3000");
+  const preferredPort = parseInt(process.env.PORT || "3000", 10);
   const port = await findAvailablePort(preferredPort);
 
   if (port !== preferredPort) {
@@ -75,21 +89,44 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log("");
-    console.log("═══════════════════════════════════════════════════");
-    console.log("  TRINETRA AI — Cyber Defense Platform");
+    console.log("===================================================");
+    console.log("  TRINETRA AI - Cyber Defense Platform");
     console.log(`  http://localhost:${port}/`);
     if (isLocalDev()) {
       console.log("  Mode: LOCAL_DEV (filesystem storage + dev auth)");
       console.log(`  Dev login: http://localhost:${port}/api/dev/login`);
     }
-    console.log(`  WebSocket: ws://localhost:${port}/api/ws`);
-    console.log(`  Database: ${ENV.databaseUrl ? "configured" : "MISSING — set DATABASE_URL"}`);
-    console.log(`  LLM: ${ENV.forgeApiKey ? "Forge/Gemini" : isLocalDev() ? "mock (grounded)" : "MISSING API KEY"}`);
+    console.log(
+      `  WebSocket: ${
+        isWebSocketRoleEnabled()
+          ? `ws://localhost:${port}/api/ws`
+          : "disabled for worker-only role"
+      }`
+    );
+    console.log(
+      `  Database: ${
+        ENV.databaseUrl ? "configured" : "MISSING - set DATABASE_URL"
+      }`
+    );
+    console.log(
+      `  LLM: ${
+        ENV.forgeApiKey
+          ? "Forge/Gemini"
+          : isLocalDev()
+            ? "mock (grounded)"
+            : "MISSING API KEY"
+      }`
+    );
     console.log(`  Storage: ${getStorageMode()}`);
     console.log(`  Queue: ${useCloudTasks() ? "Cloud Tasks" : "inline"}`);
-    console.log(`  Redis WS bridge: ${useRedisPubSub() ? "enabled" : "disabled (single-instance)"}`);
+    console.log(
+      `  Redis WS bridge: ${
+        useRedisPubSub() ? "enabled" : "disabled (single-instance)"
+      }`
+    );
+    console.log(`  Worker role: ${ENV.workerRole}`);
     console.log(`  Region: ${ENV.deploymentRegion}`);
-    console.log("═══════════════════════════════════════════════════");
+    console.log("===================================================");
     console.log("");
   });
 }

@@ -4,6 +4,7 @@ import type { InvestigationEvent } from "../websocket";
 
 type RedisClient = {
   publish: (channel: string, message: string) => Promise<number>;
+  xadd?: (...args: string[]) => Promise<string>;
   subscribe: (channel: string) => Promise<void>;
   on: (event: string, listener: (...args: unknown[]) => void) => void;
   duplicate: () => RedisClient;
@@ -12,6 +13,7 @@ type RedisClient = {
 let publisher: RedisClient | null = null;
 let subscriber: RedisClient | null = null;
 const CHANNEL = "trinetra:investigation-events";
+const STREAM = "trinetra:investigation-events-stream";
 
 let localBroadcast: ((event: InvestigationEvent) => void) | null = null;
 
@@ -52,6 +54,18 @@ export async function publishInvestigationEvent(
 ): Promise<void> {
   const redis = await getRedis();
   if (redis) {
+    if (redis.xadd) {
+      await redis.xadd(
+        STREAM,
+        "*",
+        "investigationId",
+        String(event.investigationId),
+        "eventType",
+        event.type,
+        "payload",
+        JSON.stringify(event)
+      );
+    }
     await redis.publish(CHANNEL, JSON.stringify(event));
   }
 }

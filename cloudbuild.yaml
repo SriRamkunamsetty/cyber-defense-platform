@@ -12,12 +12,19 @@ steps:
       - build
       - -t
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$SHORT_SHA
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:latest
       - .
 
   - name: gcr.io/cloud-builders/docker
     args:
       - push
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$SHORT_SHA
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:latest
 
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
@@ -33,13 +40,16 @@ steps:
       - --cpu=2
       - --timeout=900
       - --min-instances=0
-      - --max-instances=10
-      - --set-env-vars=NODE_ENV=production,LOCAL_DEV=false,DEPLOYMENT_REGION=${_REGION},REQUIRE_LLM_KEY=true
+      - --max-instances=5
+      - --session-affinity
+      - --set-env-vars=NODE_ENV=production,LOCAL_DEV=false,PORT=8080,DEPLOYMENT_REGION=${_REGION},REQUIRE_LLM_KEY=true,GCS_BUCKET=trinetra-apk-artifacts,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=${_REGION},GCP_TASKS_QUEUE=trinetra-investigations,FIREBASE_PROJECT_ID=iithyderabad-apk
       - --set-secrets=DATABASE_URL=trinetra-database-url:latest,JWT_SECRET=trinetra-jwt-secret:latest,BUILT_IN_FORGE_API_KEY=trinetra-forge-api-key:latest,WORKER_SECRET=trinetra-worker-secret:latest
       - --add-cloudsql-instances=$PROJECT_ID:${_REGION}:trinetra-mysql
 
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:latest
 
 options:
   logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8

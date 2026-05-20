@@ -8,8 +8,11 @@ export interface InvestigationEvent {
     | "agent_error"
     | "investigation_complete"
     | "investigation_error"
+    | "lifecycle_transition"
+    | "checkpoint_saved"
     | "subscribed";
   investigationId: number;
+  sequence?: number;
   agentName?: string;
   progress?: number;
   message?: string;

@@ -50,10 +50,36 @@ const AGENT_ICONS: Record<string, React.ReactNode> = {
   "Executive Report": <Shield className="w-5 h-5" />,
 };
 
+function mapEventToLog(
+  event: Pick<
+    InvestigationEvent,
+    "type" | "agentName" | "message" | "timestamp" | "progress" | "sequence"
+  >
+): LogEntry | null {
+  if (!event.message) return null;
+
+  return {
+    id:
+      event.sequence !== undefined
+        ? `evt-${event.sequence}`
+        : `ws-${event.timestamp}-${event.type}-${event.agentName ?? "system"}`,
+    agent: event.agentName || "System",
+    message: event.message,
+    status:
+      event.type === "agent_error" || event.type === "investigation_error"
+        ? "error"
+        : event.type === "investigation_complete" || event.type === "agent_complete"
+          ? "completed"
+          : "running",
+    timestamp: event.timestamp,
+    progress: event.progress,
+  };
+}
+
 function mapAgentLogsToCards(
   agentLogs: Array<{
     agentName: string;
-    status: string;
+    status: string | null;
     progress: number | null;
     findings: string | null;
   }>
@@ -105,31 +131,58 @@ export default function Investigation() {
       },
     }
   );
+  const { data: eventHistory } = trpc.investigation.getEventHistory.useQuery(
+    { investigationId: investigationId! },
+    {
+      enabled: !!investigationId && !isNaN(investigationId),
+    }
+  );
 
   const copilotMutation = trpc.investigation.askCopilot.useMutation();
+
+  useEffect(() => {
+    if (!eventHistory?.length) return;
+
+    const seededLogs = [...eventHistory]
+      .sort((a, b) => a.id - b.id)
+      .map((event) => {
+        const payload =
+          typeof event.payload === "object" && event.payload !== null
+            ? (event.payload as Record<string, unknown>)
+            : {};
+        return mapEventToLog({
+          type: event.eventType as InvestigationEvent["type"],
+          sequence: event.sequence,
+          agentName:
+            typeof payload.agentName === "string" ? payload.agentName : undefined,
+          message:
+            typeof payload.message === "string" ? payload.message : undefined,
+          progress:
+            typeof payload.progress === "number" ? payload.progress : undefined,
+          timestamp:
+            typeof payload.timestamp === "string"
+              ? payload.timestamp
+              : new Date(event.createdAt).toISOString(),
+        });
+      })
+      .filter((entry): entry is LogEntry => entry !== null);
+
+    setLogs((prev) => {
+      if (prev.length >= seededLogs.length) return prev;
+      return seededLogs;
+    });
+  }, [eventHistory, investigationId]);
 
   const handleWsEvent = useCallback(
     (event: InvestigationEvent) => {
       if (event.investigationId !== investigationId) return;
 
-      if (event.message) {
-        const entry: LogEntry = {
-          id: `ws-${event.timestamp}-${Math.random()}`,
-          agent: event.agentName || "System",
-          message: event.message,
-          status:
-            event.type === "agent_error" || event.type === "investigation_error"
-              ? "error"
-              : event.type === "investigation_complete" ||
-                  event.type === "agent_complete"
-                ? "completed"
-                : "running",
-          timestamp: event.timestamp,
-          progress: event.progress,
-        };
+      const entry = mapEventToLog(event);
+      if (entry) {
         setLogs((prev) => {
-          if (prev.some((l) => l.message === entry.message && l.status === entry.status))
+          if (prev.some((l) => l.id === entry.id)) {
             return prev;
+          }
           return [...prev, entry];
         });
       }
@@ -194,10 +247,10 @@ export default function Investigation() {
                 ? 55
                 : 30,
         type: ioc.type.includes("permission")
-          ? "permission"
+          ? ("permission" as const)
           : ioc.type.includes("network")
-            ? "endpoint"
-            : "api",
+            ? ("endpoint" as const)
+            : ("api" as const),
       })),
     [iocs]
   );

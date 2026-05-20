@@ -1,4 +1,12 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import {
+  int,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  varchar,
+} from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -35,6 +43,19 @@ export const investigations = mysqlTable("investigations", {
   riskScore: int("riskScore").default(0),
   riskLevel: mysqlEnum("riskLevel", ["low", "medium", "high", "critical"]).default("low"),
   status: mysqlEnum("status", ["pending", "analyzing", "completed", "failed"]).default("pending"),
+  lifecycleState: mysqlEnum("lifecycleState", [
+    "created",
+    "queued",
+    "downloading_artifact",
+    "reverse_engineering",
+    "forensic_validation",
+    "ai_processing",
+    "completed",
+    "failed",
+  ])
+    .default("created")
+    .notNull(),
+  currentCheckpoint: varchar("currentCheckpoint", { length: 128 }),
   dataExfiltrationScore: int("dataExfiltrationScore").default(0),
   credentialHarvestingScore: int("credentialHarvestingScore").default(0),
   c2CommunicationScore: int("c2CommunicationScore").default(0),
@@ -55,6 +76,110 @@ export const investigations = mysqlTable("investigations", {
 
 export type Investigation = typeof investigations.$inferSelect;
 export type InsertInvestigation = typeof investigations.$inferInsert;
+
+export const investigationCheckpoints = mysqlTable(
+  "investigationCheckpoints",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    investigationId: int("investigationId")
+      .notNull()
+      .references(() => investigations.id),
+    checkpointKey: varchar("checkpointKey", { length: 128 }).notNull(),
+    status: mysqlEnum("status", ["active", "superseded"]).default("active").notNull(),
+    payload: text("payload"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => ({
+    investigationCheckpointKeyUnique: uniqueIndex(
+      "investigation_checkpoint_key_unique"
+    ).on(table.investigationId, table.checkpointKey),
+  })
+);
+
+export type InvestigationCheckpoint = typeof investigationCheckpoints.$inferSelect;
+
+export const evidenceEntities = mysqlTable(
+  "evidenceEntities",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    investigationId: int("investigationId")
+      .notNull()
+      .references(() => investigations.id),
+    entityKey: varchar("entityKey", { length: 191 }).notNull(),
+    entityType: mysqlEnum("entityType", [
+      "package",
+      "permission",
+      "ioc",
+      "method",
+      "component",
+      "certificate",
+      "embedded_string",
+      "native_library",
+      "static_finding",
+      "behavioral_finding",
+      "attack_stage",
+      "malware_family",
+    ])
+      .notNull(),
+    displayName: varchar("displayName", { length: 255 }).notNull(),
+    severity: mysqlEnum("severity", ["low", "medium", "high", "critical"])
+      .default("low")
+      .notNull(),
+    confidence: int("confidence").default(0).notNull(),
+    sourceType: varchar("sourceType", { length: 64 }),
+    sourceRef: varchar("sourceRef", { length: 255 }),
+    lineageJson: text("lineageJson"),
+    metadataJson: text("metadataJson"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => ({
+    evidenceEntityKeyUnique: uniqueIndex("evidence_entity_key_unique").on(
+      table.investigationId,
+      table.entityKey
+    ),
+  })
+);
+
+export type EvidenceEntityRow = typeof evidenceEntities.$inferSelect;
+
+export const evidenceEdges = mysqlTable(
+  "evidenceEdges",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    investigationId: int("investigationId")
+      .notNull()
+      .references(() => investigations.id),
+    edgeKey: varchar("edgeKey", { length: 255 }).notNull(),
+    fromEntityId: int("fromEntityId")
+      .notNull()
+      .references(() => evidenceEntities.id),
+    toEntityId: int("toEntityId")
+      .notNull()
+      .references(() => evidenceEntities.id),
+    relationshipType: mysqlEnum("relationshipType", [
+      "declares",
+      "contains",
+      "supports",
+      "derives_to",
+      "indicates",
+      "classified_as",
+      "references",
+    ])
+      .notNull(),
+    metadataJson: text("metadataJson"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => ({
+    evidenceEdgeKeyUnique: uniqueIndex("evidence_edge_key_unique").on(
+      table.investigationId,
+      table.edgeKey
+    ),
+  })
+);
+
+export type EvidenceEdgeRow = typeof evidenceEdges.$inferSelect;
 
 // IOC (Indicators of Compromise) table
 export const iocs = mysqlTable("iocs", {

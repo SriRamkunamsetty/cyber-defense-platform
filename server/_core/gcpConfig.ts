@@ -8,7 +8,7 @@ export function useCloudTasks(): boolean {
   return Boolean(
     ENV.gcpProjectId &&
       ENV.gcpTasksQueue &&
-      ENV.workerUrl &&
+      (ENV.forensicsWorkerUrl || ENV.workerUrl) &&
       ENV.workerSecret
   );
 }
