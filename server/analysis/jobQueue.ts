@@ -64,7 +64,7 @@ async function enqueueCloudTaskForStage(
         url,
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${ENV.workerSecret}`,
+          Authorization: `Bearer ${(ENV.workerSecret || "").trim()}`,
         },
         body: payload,
       },
@@ -100,6 +100,16 @@ export async function enqueueInvestigation(
   request: InvestigationRequest
 ): Promise<{ mode: "cloud_tasks" | "inline"; jobId: number | null }> {
   const jobId = await createJobRecord(request.investigationId);
+
+  const { transitionInvestigationLifecycle } = await import("../db");
+  await transitionInvestigationLifecycle(request.investigationId, "queued");
+  await broadcastInvestigationEvent({
+    type: "lifecycle_transition",
+    investigationId: request.investigationId,
+    message: "Investigation accepted into durable pipeline queue",
+    data: { lifecycleState: "queued" },
+    timestamp: new Date().toISOString(),
+  });
 
   if (useCloudTasks()) {
     await enqueueCloudTaskForStage(request.investigationId, "forensics");

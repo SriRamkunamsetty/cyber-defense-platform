@@ -16,6 +16,7 @@ export default function Dashboard() {
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const uploadMutation = trpc.investigation.createFromUpload.useMutation({
     onSuccess: (data) => {
@@ -26,6 +27,7 @@ export default function Dashboard() {
     onError: (err) => {
       toast.error(err.message || "Upload failed");
       setUploadProgress(0);
+      setIsAnalyzing(false);
     },
   });
 
@@ -57,6 +59,7 @@ export default function Dashboard() {
   const handleAnalyze = async () => {
     if (!selectedFile) return;
 
+    setIsAnalyzing(true);
     setUploadProgress(10);
     try {
       const { uploadUrl, fileKey } = await getUploadUrlMutation.mutateAsync({
@@ -100,6 +103,7 @@ export default function Dashboard() {
       console.error("Upload error:", err);
       toast.error(err?.message || "Upload process failed");
       setUploadProgress(0);
+      setIsAnalyzing(false);
     }
   };
 
@@ -207,18 +211,22 @@ export default function Dashboard() {
                         ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
                       </span>
                     </motion.div>
-                    {uploadMutation.isPending && (
+                    {isAnalyzing && (
                       <div className="mt-4 space-y-2">
                         <Progress value={uploadProgress} className="h-1" />
-                        <p className="text-xs text-cyan-300">Uploading and starting investigation…</p>
+                        <p className="text-xs text-cyan-300">
+                          {uploadProgress < 30 && "Generating secure upload URL..."}
+                          {uploadProgress >= 30 && uploadProgress < 85 && `Uploading APK to secure bucket (${uploadProgress}%)...`}
+                          {uploadProgress >= 85 && "Initializing agent analysis pipeline..."}
+                        </p>
                       </div>
                     )}
                     <Button
                       className="btn-cyber mt-4 w-full"
                       onClick={handleAnalyze}
-                      disabled={uploadMutation.isPending}
+                      disabled={isAnalyzing}
                     >
-                      {uploadMutation.isPending ? (
+                      {isAnalyzing ? (
                         <>
                           <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                           Starting Investigation…

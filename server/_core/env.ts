@@ -27,6 +27,7 @@ export const ENV = {
   vertexProjectId: process.env.VERTEX_PROJECT_ID ?? process.env.GCP_PROJECT_ID ?? "",
   vertexLocation: process.env.VERTEX_LOCATION ?? "asia-south1",
   useVertexAi: process.env.USE_VERTEX_AI === "true" || process.env.USE_VERTEX_AI === "1",
+  vertexCredentialsJson: process.env.VERTEX_CREDENTIALS_JSON ?? "",
 
   // Firebase Auth
   firebaseProjectId: process.env.FIREBASE_PROJECT_ID ?? "iithyderabad-apk",

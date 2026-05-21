@@ -339,7 +339,130 @@ const normalizeResponseFormat = ({
   };
 };
 
+let oauthToken: string | null = null;
+let tokenExpiry = 0;
+
+async function getVertexAccessToken(): Promise<string> {
+  if (oauthToken && Date.now() < tokenExpiry) {
+    return oauthToken;
+  }
+
+  const { GoogleAuth } = await import("google-auth-library");
+  const options: any = {
+    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+  };
+
+  if (ENV.vertexCredentialsJson && !process.env.K_SERVICE) {
+    try {
+      options.credentials = JSON.parse(ENV.vertexCredentialsJson);
+      console.log("[LLM] Loaded Vertex AI credentials from VERTEX_CREDENTIALS_JSON");
+    } catch (e) {
+      console.error("[LLM] Failed to parse VERTEX_CREDENTIALS_JSON:", e);
+    }
+  } else if (process.env.K_SERVICE) {
+    console.log("[LLM] Running on Cloud Run: Using Application Default Credentials (ADC) for Vertex AI");
+  }
+
+  const auth = new GoogleAuth(options);
+  const tokenResponse = await auth.getAccessToken();
+  if (!tokenResponse) {
+    throw new Error("Failed to retrieve Google access token for Vertex AI");
+  }
+
+  oauthToken = tokenResponse;
+  tokenExpiry = Date.now() + 3300 * 1000; // 55 mins cache
+  return oauthToken;
+}
+
+async function invokeVertexLLM(params: InvokeParams): Promise<InvokeResult> {
+  const { messages } = params;
+  const accessToken = await getVertexAccessToken();
+
+  const {
+    tools,
+    toolChoice,
+    tool_choice,
+    outputSchema,
+    output_schema,
+    responseFormat,
+    response_format,
+  } = params;
+
+  let modelName = "gemini-2.5-flash";
+  let projectId = ENV.vertexProjectId;
+
+  if (ENV.vertexCredentialsJson && !process.env.K_SERVICE) {
+    try {
+      const creds = JSON.parse(ENV.vertexCredentialsJson);
+      if (creds.project_id) {
+        projectId = creds.project_id;
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+  if (!projectId) {
+    projectId = ENV.gcpProjectId || "iithyderabad";
+  }
+
+  const payload: Record<string, unknown> = {
+    model: `google/${modelName}`,
+    messages: messages.map(normalizeMessage),
+  };
+
+  if (tools && tools.length > 0) {
+    payload.tools = tools;
+  }
+
+  const normalizedToolChoice = normalizeToolChoice(
+    toolChoice || tool_choice,
+    tools
+  );
+  if (normalizedToolChoice) {
+    payload.tool_choice = normalizedToolChoice;
+  }
+
+  payload.max_tokens = 32768;
+
+  const normalizedResponseFormat = normalizeResponseFormat({
+    responseFormat,
+    response_format,
+    outputSchema,
+    output_schema,
+  });
+
+  if (normalizedResponseFormat) {
+    payload.response_format = normalizedResponseFormat;
+  }
+
+  const url = `https://${ENV.vertexLocation}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${ENV.vertexLocation}/endpoints/openapi/chat/completions`;
+
+  console.log(`[LLM] Invoking Vertex AI endpoint: ${url} for model google/${modelName}`);
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Vertex AI invoke failed: ${response.status} ${response.statusText} – ${errorText}`
+    );
+  }
+
+  return (await response.json()) as InvokeResult;
+}
+
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
+  if (ENV.useVertexAi) {
+    return invokeVertexLLM(params);
+  }
+
   assertApiKey();
 
   const { messages } = params;

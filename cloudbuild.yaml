@@ -42,8 +42,8 @@ steps:
       - --min-instances=0
       - --max-instances=5
       - --session-affinity
-      - --set-env-vars=NODE_ENV=production,LOCAL_DEV=false,DEPLOYMENT_REGION=${_REGION},REQUIRE_LLM_KEY=true,GCS_BUCKET=trinetra-apk-artifacts,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=${_REGION},GCP_TASKS_QUEUE=trinetra-investigations,FIREBASE_PROJECT_ID=iithyderabad-apk
-      - --set-secrets=DATABASE_URL=trinetra-database-url:latest,JWT_SECRET=trinetra-jwt-secret:latest,BUILT_IN_FORGE_API_KEY=trinetra-forge-api-key:latest,WORKER_SECRET=trinetra-worker-secret:latest
+      - --set-env-vars=NODE_ENV=production,LOCAL_DEV=false,DEPLOYMENT_REGION=${_REGION},REQUIRE_LLM_KEY=true,GCS_BUCKET=trinetra-apk-artifacts,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=${_REGION},GCP_TASKS_QUEUE=trinetra-investigations,FIREBASE_PROJECT_ID=iithyderabad-apk,WORKER_URL=https://trinetra-ai-676937538002.asia-south1.run.app,USE_VERTEX_AI=true,VERTEX_PROJECT_ID=iithyderabad,VERTEX_LOCATION=asia-south1
+      - --set-secrets=DATABASE_URL=trinetra-database-url:latest,JWT_SECRET=trinetra-jwt-secret:latest,BUILT_IN_FORGE_API_KEY=trinetra-forge-api-key:latest,WORKER_SECRET=trinetra-worker-secret:latest,VERTEX_CREDENTIALS_JSON=trinetra-firebase-key:latest
       - --add-cloudsql-instances=$PROJECT_ID:${_REGION}:trinetra-mysql
 
 images:
